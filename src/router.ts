@@ -13,6 +13,8 @@ import {
 	handleCatsRequest,
 	handleCreateCatRequest,
 	handleGetCatRequest,
+	handleLikeCatRequest,
+	handleRemoveLikeCatRequest,
 	handleListCatsRequest,
 	handleSearchCatsByTagsRequest,
 } from "./routes/cats";
@@ -67,6 +69,14 @@ export async function handleRequest(
 
 	if (url.pathname === "/cats/search/tags" && request.method === "GET") {
 		return handleSearchCatsByTagsRequest(request, env);
+	}
+
+	if (url.pathname === "/cats/like" && request.method === "POST") {
+		return handleLikeCatRequest(request, env);
+	}
+
+	if (url.pathname === "/cats/removeLike" && request.method === "POST") {
+		return handleRemoveLikeCatRequest(request, env);
 	}
 
 	if (url.pathname === "/cats" && request.method === "GET") {

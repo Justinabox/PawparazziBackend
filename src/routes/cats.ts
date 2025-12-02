@@ -1,7 +1,15 @@
 import { AuthError, HttpError } from "../errors";
-import type { Cat, CatRecord, CatListPayload, CatResponsePayload } from "../models";
+import type {
+	Cat,
+	CatRecord,
+	CatListPayload,
+	CatResponsePayload,
+	CatLikePayload,
+} from "../models";
 import { ok, fail, handleRouteError } from "../responses";
 import { getSupabaseClient, type SupabaseClientType } from "../supabaseClient";
+import { CatLikeService } from "../services/catLikeService";
+import { UserService } from "../services/userService";
 import {
 	parseBase64Image,
 	parseBodyFields,
@@ -307,6 +315,17 @@ export async function handleSearchCatsByTagsRequest(
 	}
 }
 
+export function handleLikeCatRequest(request: Request, env: Env): Promise<Response> {
+	return handleCatLikeMutation(request, env, "like");
+}
+
+export function handleRemoveLikeCatRequest(
+	request: Request,
+	env: Env,
+): Promise<Response> {
+	return handleCatLikeMutation(request, env, "remove");
+}
+
 async function resolveUsernameBySessionToken(
 	supabase: SupabaseClientType,
 	sessionToken: string,
@@ -341,6 +360,7 @@ function mapCatRecordToApi(row: CatRecord, env: Env): Cat {
 			longitude: row.location_longitude,
 		},
 		image_url: buildCatImageUrl(row.r2_path, env),
+		likes: row.likes ?? 0,
 	};
 }
 
@@ -421,4 +441,49 @@ function base64Decode(encoded: string): string {
 
 function buildCursorClause(cursor: CursorPayload): string {
 	return `and(created_at.lt.${cursor.created_at}),and(created_at.eq.${cursor.created_at},id.lt.${cursor.id})`;
+}
+
+type CatLikeMutation = "like" | "remove";
+
+async function handleCatLikeMutation(
+	request: Request,
+	env: Env,
+	action: CatLikeMutation,
+): Promise<Response> {
+	try {
+		const fields = await parseBodyFields(request);
+		const sessionToken = fields.session_token ?? null;
+		const catId = fields.cat_id ?? null;
+
+		const sessionError = validateSessionToken(sessionToken);
+		if (sessionError) {
+			return fail(sessionError, 401);
+		}
+
+		if (!catId) {
+			return fail("Missing cat_id", 400);
+		}
+
+		if (!isValidUuid(catId)) {
+			return fail("Invalid cat_id", 400);
+		}
+
+		const supabase = getSupabaseClient(env);
+		const userService = new UserService(supabase);
+		const likeService = new CatLikeService(supabase, userService);
+
+		const totalLikes =
+			action === "like"
+				? await likeService.likeCat(sessionToken!, catId)
+				: await likeService.unlikeCat(sessionToken!, catId);
+
+		const liked = action === "like";
+		return ok<CatLikePayload>({
+			cat_id: catId,
+			likes: totalLikes,
+			liked,
+		});
+	} catch (err) {
+		return handleRouteError(err);
+	}
 }

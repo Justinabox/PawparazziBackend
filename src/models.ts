@@ -33,6 +33,7 @@ export type Cat = {
 	description: string | null;
 	location: CatLocation;
 	image_url: string;
+	likes: number;
 };
 
 export type CatRecord = {
@@ -45,6 +46,7 @@ export type CatRecord = {
 	location_latitude: number | null;
 	location_longitude: number | null;
 	r2_path: string;
+	likes: number | null;
 };
 
 export type CatResponsePayload = {
@@ -54,6 +56,12 @@ export type CatResponsePayload = {
 export type CatListPayload = {
 	cats: Cat[];
 	next_cursor: string | null;
+};
+
+export type CatLikePayload = {
+	cat_id: string;
+	likes: number;
+	liked: boolean;
 };
 
 export type TagSearchMode = "any" | "all";
