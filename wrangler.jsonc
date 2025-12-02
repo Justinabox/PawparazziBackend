@@ -9,7 +9,22 @@
 	"compatibility_date": "2025-12-02",
 	"observability": {
 		"enabled": true
-	}
+	},
+	// Environment variables (non-sensitive only; use `wrangler secret` for secrets)
+	// Docs: https://developers.cloudflare.com/workers/wrangler/configuration/#environment-variables
+	"vars": {
+		// Replace with your actual Supabase project URL, e.g. "https://xyzcompany.supabase.co"
+		"SUPABASE_URL": "https://sjsgeolqkcrrdqlhsgzx.supabase.co"
+	},
+	// R2 object storage binding
+	// Docs: https://developers.cloudflare.com/r2/api/workers/workers-api-usage/
+	"r2_buckets": [
+		{
+			"binding": "R2_BUCKET",
+			"bucket_name": "pawparazzi",
+			"preview_bucket_name": "pawparazzi-dev"
+		}
+	]
 	/**
 	 * Smart Placement
 	 * Docs: https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement

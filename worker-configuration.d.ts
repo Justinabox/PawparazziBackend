@@ -6,6 +6,22 @@ declare namespace Cloudflare {
 		mainModule: typeof import("./src/index");
 	}
 	interface Env {
+		/**
+		 * Supabase project URL, e.g. "https://xyzcompany.supabase.co"
+		 * Configured via `vars` in `wrangler.jsonc`.
+		 */
+		SUPABASE_URL: string;
+
+		/**
+		 * Supabase service role key (or anon key) used by the backend.
+		 * Configure as a secret with: `wrangler secret put SUPABASE_SERVICE_ROLE_KEY`.
+		 */
+		SUPABASE_SECRET: string;
+
+		/**
+		 * R2 bucket binding for object storage.
+		 */
+		R2_BUCKET: R2Bucket;
 	}
 }
 interface Env extends Cloudflare.Env {}
