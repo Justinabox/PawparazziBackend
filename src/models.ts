@@ -35,6 +35,8 @@ export type Cat = {
 	location: CatLocation;
 	image_url: string;
 	likes: number;
+	poster_avatar_url: string | null;
+	user_liked: boolean;
 };
 
 export type CatRecord = {

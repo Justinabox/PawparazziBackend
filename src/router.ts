@@ -2,6 +2,7 @@ import {
 	handleChangeAvatarRequest,
 	handleChangePasswordRequest,
 	handleCheckUsernameRequest,
+	handleGetUserProfileRequest,
 	handleLoginRequest,
 	handleRegisterRequest,
 	handleUpdateUserRequest,
@@ -37,6 +38,10 @@ export async function handleRequest(
 
 	if (url.pathname === "/users/login" && request.method === "POST") {
 		return handleLoginRequest(request, env);
+	}
+
+	if (url.pathname === "/users/profile" && request.method === "GET") {
+		return handleGetUserProfileRequest(request, env);
 	}
 
 	if (url.pathname === "/users/update" && request.method === "POST") {

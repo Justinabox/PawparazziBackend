@@ -24,7 +24,7 @@ This document describes every HTTP endpoint exposed by the Pawparazzi Cloudflare
 - **User** (`user` in responses):
   - `username` (string), `bio` (nullable string), `location` (nullable string), `email` (string), `avatar_url` (nullable string pointing to the user's R2/CDN avatar).
 - **Cat** (`cat` entries in listings or detail responses):
-  - `id` (UUID v4), `name`, `tags` (`string[]`), `created_at` (ISO timestamp), `username` (owner), `description` (nullable), `location.latitude`/`longitude` (`number | null`), `image_url` (string pointing to R2/CDN), `likes` (number).
+  - `id` (UUID v4), `name`, `tags` (`string[]`), `created_at` (ISO timestamp), `username` (owner), `description` (nullable), `location.latitude`/`longitude` (`number | null`), `image_url` (string pointing to R2/CDN), `likes` (number), `poster_avatar_url` (nullable string pointing to the owner's avatar), `user_liked` (boolean indicating whether the requesting user has liked the post; defaults to `false` when no session token is supplied).
 - **FollowerSummary** (`followers` array items):
   - `username`, `bio`, `location`, `avatar_url`, `followed_at` (ISO timestamp).
 - **Pagination helpers**:
@@ -94,6 +94,30 @@ Authenticate a user and rotate their session token.
   - `400` invalid username format or malformed hash
   - `401` invalid credentials
   - `500` Supabase errors
+
+#### `GET /users/profile`
+
+Return the authenticated user's profile using their current session token.
+
+- **Query parameters / body fields**:
+  - `session_token` (required). You may supply this either as a `session_token` query parameter or inside a JSON body.
+- **Success** `200 OK`:
+  ```json
+  {
+    "success": true,
+    "error": "",
+    "user": {
+      "username": "catfan",
+      "bio": null,
+      "location": null,
+      "email": "catfan@example.com",
+      "avatar_url": null
+    }
+  }
+  ```
+- **Failure**:
+  - `401` missing/invalid session token
+  - `500` Supabase read errors
 
 #### `POST /users/update`
 
@@ -228,6 +252,7 @@ Paginated, reverse-chronological list of cat posts. `/cats` is a backwards-compa
   - `limit` (optional, default 20, max 50)
   - `cursor` (optional, opaque base64 string previously returned as `next_cursor`)
   - `username` (optional filter for posts authored by a specific user; validated same as other usernames)
+  - `session_token` (optional; when supplied, `user_liked` reflects whether this session's user has liked each returned cat)
 - **Success** `200 OK`:
   ```json
   {
@@ -243,7 +268,9 @@ Paginated, reverse-chronological list of cat posts. `/cats` is a backwards-compa
 
 Fetch a single cat post by ID.
 
-- **Query parameters**: `id` (required UUID v4).
+- **Query parameters**:
+  - `id` (required UUID v4)
+  - `session_token` (optional; populates `user_liked` for the caller)
 - **Success** `200 OK`: `{ "success": true, "error": "", "cat": { … } }`
 - **Failure**:
   - `400` missing/invalid UUID
@@ -259,6 +286,7 @@ Search cats by tags.
   - `mode` (optional: `"any"` default matches overlapping tags, `"all"` requires every provided tag)
   - `limit` (optional, default 20, max 50)
   - `cursor` (optional opaque base64 string from `next_cursor`)
+  - `session_token` (optional; when supplied, `user_liked` reflects this session's like status)
 - **Success** `200 OK`: same payload shape as `/cats/list`.
 - **Failure**:
   - `400` when tags missing/invalid, no tags supplied, invalid mode, limit, or cursor

@@ -12,6 +12,37 @@ import {
 } from "../validation";
 import { UserService } from "../services/userService";
 
+export async function handleGetUserProfileRequest(
+	request: Request,
+	env: Env,
+): Promise<Response> {
+	try {
+		const url = new URL(request.url);
+		let sessionToken = url.searchParams.get("session_token");
+
+		if (!sessionToken) {
+			const fields = await parseBodyFields(request);
+			sessionToken = fields.session_token ?? null;
+		}
+
+		const sessionError = validateSessionToken(sessionToken);
+		if (sessionError) {
+			return fail(sessionError, 401, { user: null });
+		}
+
+		const supabase = getSupabaseClient(env);
+		const service = new UserService(supabase, env);
+		const user = await service.getUserBySessionToken(sessionToken!);
+
+		return ok({ user });
+	} catch (err) {
+		if (err instanceof AuthError) {
+			return fail(err.message, err.status, { user: null });
+		}
+		return handleRouteError(err);
+	}
+}
+
 export async function handleCheckUsernameRequest(
 	request: Request,
 	env: Env,

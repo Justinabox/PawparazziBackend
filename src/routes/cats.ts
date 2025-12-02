@@ -10,7 +10,7 @@ import { ok, fail, handleRouteError } from "../responses";
 import { getSupabaseClient, type SupabaseClientType } from "../supabaseClient";
 import { CatLikeService } from "../services/catLikeService";
 import { UserService } from "../services/userService";
-import { buildPublicR2Url } from "../r2";
+import { buildOptionalPublicR2Url, buildPublicR2Url } from "../r2";
 import {
 	parseBase64Image,
 	parseBodyFields,
@@ -128,7 +128,13 @@ export async function handleCreateCatRequest(
 			throw new HttpError("Failed to create cat", 500);
 		}
 
-		const cat = mapCatRecordToApi(data as CatRecord, env);
+		const [cat] = await mapCatsWithMetadata(
+			[data as CatRecord],
+			env,
+			supabase,
+			username,
+		);
+
 		return ok<CatResponsePayload>({ cat }, 201);
 	} catch (err) {
 		if (err instanceof AuthError) {
@@ -147,6 +153,8 @@ export async function handleListCatsRequest(
 		const rawLimit = url.searchParams.get("limit");
 		const rawCursor = url.searchParams.get("cursor");
 		const usernameFilter = url.searchParams.get("username");
+		const sessionToken = url.searchParams.get("session_token");
+		let sessionUsername: string | null = null;
 
 		if (usernameFilter) {
 			const usernameError = validateUsername(usernameFilter);
@@ -166,6 +174,19 @@ export async function handleListCatsRequest(
 		}
 
 		const supabase = getSupabaseClient(env);
+
+		if (sessionToken) {
+			const sessionError = validateSessionToken(sessionToken);
+			if (sessionError) {
+				return fail(sessionError, 401);
+			}
+
+			sessionUsername = await resolveUsernameBySessionToken(
+				supabase,
+				sessionToken,
+			);
+		}
+
 		let query = supabase
 			.from("cats")
 			.select("*")
@@ -191,7 +212,13 @@ export async function handleListCatsRequest(
 		const visibleRows = hasMore ? rows.slice(0, limit) : rows;
 		const nextCursor = hasMore ? encodeCursor(rows[limit]) : null;
 
-		const cats = visibleRows.map((row) => mapCatRecordToApi(row, env));
+		const cats = await mapCatsWithMetadata(
+			visibleRows,
+			env,
+			supabase,
+			sessionUsername,
+		);
+
 		return ok<CatListPayload>({
 			cats,
 			next_cursor: nextCursor,
@@ -208,6 +235,8 @@ export async function handleGetCatRequest(
 	try {
 		const url = new URL(request.url);
 		const id = url.searchParams.get("id");
+		const sessionToken = url.searchParams.get("session_token");
+		let sessionUsername: string | null = null;
 
 		if (!id) {
 			return fail("Missing id", 400);
@@ -218,6 +247,19 @@ export async function handleGetCatRequest(
 		}
 
 		const supabase = getSupabaseClient(env);
+
+		if (sessionToken) {
+			const sessionError = validateSessionToken(sessionToken);
+			if (sessionError) {
+				return fail(sessionError, 401);
+			}
+
+			sessionUsername = await resolveUsernameBySessionToken(
+				supabase,
+				sessionToken,
+			);
+		}
+
 		const { data, error } = await supabase
 			.from("cats")
 			.select("*")
@@ -232,7 +274,13 @@ export async function handleGetCatRequest(
 			return fail("Cat not found", 404);
 		}
 
-		const cat = mapCatRecordToApi(data as CatRecord, env);
+		const [cat] = await mapCatsWithMetadata(
+			[data as CatRecord],
+			env,
+			supabase,
+			sessionUsername,
+		);
+
 		return ok<CatResponsePayload>({ cat });
 	} catch (err) {
 		return handleRouteError(err);
@@ -249,6 +297,8 @@ export async function handleSearchCatsByTagsRequest(
 		const modeParam = url.searchParams.get("mode");
 		const rawLimit = url.searchParams.get("limit");
 		const rawCursor = url.searchParams.get("cursor");
+		const sessionToken = url.searchParams.get("session_token");
+		let sessionUsername: string | null = null;
 
 		if (!tagsParam) {
 			return fail("Missing tags", 400);
@@ -279,6 +329,19 @@ export async function handleSearchCatsByTagsRequest(
 		}
 
 		const supabase = getSupabaseClient(env);
+
+		if (sessionToken) {
+			const sessionError = validateSessionToken(sessionToken);
+			if (sessionError) {
+				return fail(sessionError, 401);
+			}
+
+			sessionUsername = await resolveUsernameBySessionToken(
+				supabase,
+				sessionToken,
+			);
+		}
+
 		let query = supabase
 			.from("cats")
 			.select("*")
@@ -305,7 +368,12 @@ export async function handleSearchCatsByTagsRequest(
 		const hasMore = rows.length > limit;
 		const visibleRows = hasMore ? rows.slice(0, limit) : rows;
 		const nextCursor = hasMore ? encodeCursor(rows[limit]) : null;
-		const cats = visibleRows.map((row) => mapCatRecordToApi(row, env));
+		const cats = await mapCatsWithMetadata(
+			visibleRows,
+			env,
+			supabase,
+			sessionUsername,
+		);
 
 		return ok<CatListPayload>({
 			cats,
@@ -348,7 +416,99 @@ async function resolveUsernameBySessionToken(
 	return data.username as string;
 }
 
-function mapCatRecordToApi(row: CatRecord, env: Env): Cat {
+async function mapCatsWithMetadata(
+	rows: CatRecord[],
+	env: Env,
+	supabase: SupabaseClientType,
+	sessionUsername: string | null,
+): Promise<Cat[]> {
+	if (!rows.length) {
+		return [];
+	}
+
+	const uniqueUsernames = Array.from(new Set(rows.map((row) => row.username)));
+	const avatarMap = await fetchPosterAvatars(supabase, env, uniqueUsernames);
+	const catIds = rows.map((row) => row.id);
+	const likedIds =
+		sessionUsername && catIds.length
+			? await fetchUserLikedCatIds(supabase, sessionUsername, catIds)
+			: new Set<string>();
+
+	return rows.map((row) =>
+		mapCatRecordToApi(row, env, {
+			posterAvatarUrl: avatarMap.get(row.username) ?? null,
+			userLiked: likedIds.has(row.id),
+		}),
+	);
+}
+
+async function fetchPosterAvatars(
+	supabase: SupabaseClientType,
+	env: Env,
+	usernames: string[],
+): Promise<Map<string, string | null>> {
+	const avatarMap = new Map<string, string | null>();
+
+	if (!usernames.length) {
+		return avatarMap;
+	}
+
+	const { data, error } = await supabase
+		.from("users")
+		.select("username,r2_avatar")
+		.in("username", usernames);
+
+	if (error) {
+		throw new HttpError("Failed to fetch poster avatars", 500);
+	}
+
+	const rows =
+		(data ?? []) as { username: string; r2_avatar: string | null }[];
+
+	for (const row of rows) {
+		avatarMap.set(
+			row.username,
+			buildOptionalPublicR2Url(row.r2_avatar ?? null, env),
+		);
+	}
+
+	return avatarMap;
+}
+
+async function fetchUserLikedCatIds(
+	supabase: SupabaseClientType,
+	username: string,
+	catIds: string[],
+): Promise<Set<string>> {
+	if (!catIds.length) {
+		return new Set<string>();
+	}
+
+	const { data, error } = await supabase
+		.from("likes")
+		.select("cat_id")
+		.eq("username", username)
+		.in("cat_id", catIds);
+
+	if (error) {
+		throw new HttpError("Failed to fetch liked cats", 500);
+	}
+
+	const likedRows = (data ?? []) as { cat_id: string }[];
+
+	return new Set(likedRows.map((row) => row.cat_id));
+}
+
+type CatRecordExtras = {
+	posterAvatarUrl?: string | null;
+	userLiked?: boolean;
+};
+
+function mapCatRecordToApi(
+	row: CatRecord,
+	env: Env,
+	extras: CatRecordExtras = {},
+): Cat {
 	return {
 		id: row.id,
 		name: row.name,
@@ -362,6 +522,8 @@ function mapCatRecordToApi(row: CatRecord, env: Env): Cat {
 		},
 		image_url: buildPublicR2Url(row.r2_path, env),
 		likes: row.likes ?? 0,
+		poster_avatar_url: extras.posterAvatarUrl ?? null,
+		user_liked: extras.userLiked ?? false,
 	};
 }
 
