@@ -6,6 +6,10 @@ import {
 	handleUpdateUserRequest,
 } from "./routes/userRoutes";
 import {
+	handleFollowUserRequest,
+	handleListFollowersRequest,
+} from "./routes/followRoutes";
+import {
 	handleCatsRequest,
 	handleCreateCatRequest,
 	handleGetCatRequest,
@@ -38,6 +42,14 @@ export async function handleRequest(
 
 	if (url.pathname === "/users/changePassword" && request.method === "POST") {
 		return handleChangePasswordRequest(request, env);
+	}
+
+	if (url.pathname === "/users/follow" && request.method === "POST") {
+		return handleFollowUserRequest(request, env);
+	}
+
+	if (url.pathname === "/users/listFollowers" && request.method === "GET") {
+		return handleListFollowersRequest(request, env);
 	}
 
 	// Cats routes

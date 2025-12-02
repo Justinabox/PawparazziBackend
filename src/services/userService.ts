@@ -123,6 +123,11 @@ export class UserService {
 		return { profile, passwordHash: data.password_hash };
 	}
 
+	async getUserBySessionToken(sessionToken: string): Promise<UserProfile> {
+		const { profile } = await this.getUserBySessionTokenInternal(sessionToken);
+		return profile;
+	}
+
 	async updateUserProfile(
 		sessionToken: string,
 		bio: string | null,

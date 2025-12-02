@@ -58,4 +58,17 @@ export type CatListPayload = {
 
 export type TagSearchMode = "any" | "all";
 
+export type FollowRecord = {
+	follower_username: string;
+	followee_username: string;
+	followed_at: string;
+};
+
+export type FollowerSummary = {
+	username: string;
+	bio: string | null;
+	location: string | null;
+	followed_at: string;
+};
+
 

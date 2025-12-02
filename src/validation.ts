@@ -199,6 +199,37 @@ export function isValidUuid(value: string | null | undefined): boolean {
 	return uuidRegex.test(value);
 }
 
+export type FollowAction = "follow" | "unfollow";
+
+export function parseFollowAction(
+	rawAction: string | null | undefined,
+): { action: FollowAction; error: string | null } {
+	if (!rawAction) {
+		return { action: "follow", error: null };
+	}
+
+	if (rawAction !== "follow" && rawAction !== "unfollow") {
+		return { action: "follow", error: "Invalid action (expected follow|unfollow)" };
+	}
+
+	return { action: rawAction, error: null };
+}
+
+export function parseFollowCursor(
+	rawCursor: string | null | undefined,
+): { cursor: string | null; error: string | null } {
+	if (!rawCursor) {
+		return { cursor: null, error: null };
+	}
+
+	const timestamp = Date.parse(rawCursor);
+	if (Number.isNaN(timestamp)) {
+		return { cursor: null, error: "Invalid cursor" };
+	}
+
+	return { cursor: new Date(timestamp).toISOString(), error: null };
+}
+
 export type ParsedBase64Image = {
 	arrayBuffer: ArrayBuffer;
 	byteLength: number;
