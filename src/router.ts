@@ -1,4 +1,5 @@
 import {
+	handleChangeAvatarRequest,
 	handleChangePasswordRequest,
 	handleCheckUsernameRequest,
 	handleLoginRequest,
@@ -44,6 +45,10 @@ export async function handleRequest(
 
 	if (url.pathname === "/users/changePassword" && request.method === "POST") {
 		return handleChangePasswordRequest(request, env);
+	}
+
+	if (url.pathname === "/users/changeAvatar" && request.method === "POST") {
+		return handleChangeAvatarRequest(request, env);
 	}
 
 	if (url.pathname === "/users/follow" && request.method === "POST") {

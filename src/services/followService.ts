@@ -2,6 +2,7 @@ import type { SupabaseClientType } from "../supabaseClient";
 import type { FollowerSummary } from "../models";
 import { HttpError } from "../errors";
 import { UserService } from "./userService";
+import { buildOptionalPublicR2Url } from "../r2";
 
 type ListFollowersOptions = {
 	limit: number;
@@ -12,6 +13,7 @@ export class FollowService {
 	constructor(
 		private readonly supabase: SupabaseClientType,
 		private readonly userService: UserService,
+		private readonly env: Env,
 	) {}
 
 	async followUser(sessionToken: string, targetUsername: string): Promise<void> {
@@ -114,12 +116,15 @@ export class FollowService {
 			(row) => row.follower_username,
 		);
 
-		const profileMap = new Map<string, { bio: string | null; location: string | null }>();
+		const profileMap = new Map<
+			string,
+			{ bio: string | null; location: string | null; r2_avatar: string | null }
+		>();
 
 		if (followerUsernames.length > 0) {
 			const { data: profiles, error: profileError } = await this.supabase
 				.from("users")
-				.select("username,bio,location")
+				.select("username,bio,location,r2_avatar")
 				.in("username", followerUsernames);
 
 			if (profileError || !profiles) {
@@ -130,6 +135,7 @@ export class FollowService {
 				profileMap.set(profile.username, {
 					bio: profile.bio,
 					location: profile.location,
+					r2_avatar: profile.r2_avatar ?? null,
 				});
 			}
 		}
@@ -141,6 +147,10 @@ export class FollowService {
 				username: row.follower_username,
 				bio: profile?.bio ?? null,
 				location: profile?.location ?? null,
+				avatar_url: buildOptionalPublicR2Url(
+					profile?.r2_avatar ?? null,
+					this.env,
+				),
 				followed_at: row.followed_at,
 			};
 		});

@@ -43,8 +43,8 @@ export async function handleFollowUserRequest(
 		}
 
 		const supabase = getSupabaseClient(env);
-		const userService = new UserService(supabase);
-		const followService = new FollowService(supabase, userService);
+		const userService = new UserService(supabase, env);
+		const followService = new FollowService(supabase, userService, env);
 
 		if (action === "follow") {
 			await followService.followUser(sessionToken!, targetUsername!);
@@ -94,8 +94,8 @@ export async function handleListFollowersRequest(
 		}
 
 		const supabase = getSupabaseClient(env);
-		const userService = new UserService(supabase);
-		const followService = new FollowService(supabase, userService);
+		const userService = new UserService(supabase, env);
+		const followService = new FollowService(supabase, userService, env);
 
 		const { followers, nextCursor } = await followService.listFollowers(
 			username!,

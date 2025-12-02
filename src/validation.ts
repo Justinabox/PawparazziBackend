@@ -5,6 +5,7 @@ export const CAT_DESCRIPTION_MAX_LENGTH = 500;
 export const CAT_TAGS_MAX = 10;
 export const CAT_TAG_MAX_LENGTH = 32;
 export const CAT_IMAGE_MAX_BYTES = 10 * 1024 * 1024; // 10MB
+export const AVATAR_IMAGE_MAX_BYTES = 5 * 1024 * 1024; // 5MB
 
 const ALLOWED_IMAGE_MIME_TYPES = [
 	"image/jpeg",
@@ -237,11 +238,20 @@ export type ParsedBase64Image = {
 	extension: string;
 };
 
+type ParseBase64ImageOptions = {
+	fieldName?: string;
+	maxBytes?: number;
+};
+
 export function parseBase64Image(
 	base64: string | null | undefined,
+	options?: ParseBase64ImageOptions,
 ): { image: ParsedBase64Image | null; error: string | null; status?: number } {
+	const fieldName = options?.fieldName ?? "image_base64";
+	const maxBytes = options?.maxBytes ?? CAT_IMAGE_MAX_BYTES;
+
 	if (!base64) {
-		return { image: null, error: "Missing image_base64", status: 400 };
+		return { image: null, error: `Missing ${fieldName}`, status: 400 };
 	}
 
 	let working = base64.trim();
@@ -255,7 +265,7 @@ export function parseBase64Image(
 		} else {
 			return {
 				image: null,
-				error: "Unsupported image content type",
+				error: `Unsupported content type for ${fieldName}`,
 				status: 400,
 			};
 		}
@@ -271,17 +281,21 @@ export function parseBase64Image(
 	try {
 		binaryString = atob(working);
 	} catch {
-		return { image: null, error: "Invalid base64 image payload", status: 400 };
+		return {
+			image: null,
+			error: `Invalid base64 payload for ${fieldName}`,
+			status: 400,
+		};
 	}
 
 	if (!binaryString.length) {
-		return { image: null, error: "Image data is empty", status: 400 };
+		return { image: null, error: `${fieldName} data is empty`, status: 400 };
 	}
 
-	if (binaryString.length > CAT_IMAGE_MAX_BYTES) {
+	if (binaryString.length > maxBytes) {
 		return {
 			image: null,
-			error: `Image exceeds ${CAT_IMAGE_MAX_BYTES / (1024 * 1024)}MB limit`,
+			error: `${fieldName} exceeds ${maxBytes / (1024 * 1024)}MB limit`,
 			status: 413,
 		};
 	}

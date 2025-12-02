@@ -1,10 +1,24 @@
 import type { SupabaseClientType } from "../supabaseClient";
 import type { UserProfile } from "../models";
 import { AuthError, ConflictError, HttpError } from "../errors";
-import { generateSessionToken } from "../validation";
+import { generateSessionToken, type ParsedBase64Image } from "../validation";
+import { buildOptionalPublicR2Url } from "../r2";
+
+type UserRecord = {
+	username: string;
+	bio: string | null;
+	location: string | null;
+	email: string;
+	r2_avatar: string | null;
+};
+
+type UserRecordWithPassword = UserRecord & { password_hash: string };
 
 export class UserService {
-	constructor(private readonly supabase: SupabaseClientType) {}
+	constructor(
+		private readonly supabase: SupabaseClientType,
+		private readonly env: Env,
+	) {}
 
 	async isUsernameAvailable(username: string): Promise<boolean> {
 		const { error, count } = await this.supabase
@@ -39,7 +53,7 @@ export class UserService {
 				email,
 				session_token: sessionToken,
 			})
-			.select("username,bio,location,email")
+			.select("username,bio,location,email,r2_avatar")
 			.single();
 
 		if (error || !data) {
@@ -48,12 +62,7 @@ export class UserService {
 
 		return {
 			sessionToken,
-			user: {
-				username: data.username,
-				bio: data.bio,
-				location: data.location,
-				email: data.email,
-			},
+			user: this.mapUserRecordToProfile(data as UserRecord),
 		};
 	}
 
@@ -63,7 +72,7 @@ export class UserService {
 	): Promise<{ sessionToken: string; user: UserProfile }> {
 		const { data, error } = await this.supabase
 			.from("users")
-			.select("username,bio,location,email,password_hash")
+			.select("username,bio,location,email,password_hash,r2_avatar")
 			.eq("username", username)
 			.maybeSingle();
 
@@ -86,22 +95,17 @@ export class UserService {
 			throw new HttpError("Failed to create session token", 500);
 		}
 
-		const user: UserProfile = {
-			username: data.username,
-			bio: data.bio,
-			location: data.location,
-			email: data.email,
-		};
+		const user = this.mapUserRecordToProfile(data as UserRecord);
 
 		return { sessionToken, user };
 	}
 
-	private async getUserBySessionTokenInternal(
+	private async getUserRecordBySessionToken(
 		sessionToken: string,
-	): Promise<{ profile: UserProfile; passwordHash: string }> {
+	): Promise<UserRecordWithPassword> {
 		const { data, error } = await this.supabase
 			.from("users")
-			.select("username,bio,location,email,password_hash")
+			.select("username,bio,location,email,password_hash,r2_avatar")
 			.eq("session_token", sessionToken)
 			.maybeSingle();
 
@@ -113,19 +117,12 @@ export class UserService {
 			throw new AuthError("Invalid session token");
 		}
 
-		const profile: UserProfile = {
-			username: data.username,
-			bio: data.bio,
-			location: data.location,
-			email: data.email,
-		};
-
-		return { profile, passwordHash: data.password_hash };
+		return data as UserRecordWithPassword;
 	}
 
 	async getUserBySessionToken(sessionToken: string): Promise<UserProfile> {
-		const { profile } = await this.getUserBySessionTokenInternal(sessionToken);
-		return profile;
+		const record = await this.getUserRecordBySessionToken(sessionToken);
+		return this.mapUserRecordToProfile(record);
 	}
 
 	async updateUserProfile(
@@ -134,25 +131,20 @@ export class UserService {
 		location: string | null,
 	): Promise<UserProfile> {
 		// Ensure session token is valid and get username
-		const { profile } = await this.getUserBySessionTokenInternal(sessionToken);
+		const record = await this.getUserRecordBySessionToken(sessionToken);
 
 		const { data, error } = await this.supabase
 			.from("users")
 			.update({ bio, location })
-			.eq("username", profile.username)
-			.select("username,bio,location,email")
+			.eq("username", record.username)
+			.select("username,bio,location,email,r2_avatar")
 			.single();
 
 		if (error || !data) {
 			throw new HttpError("Failed to update profile", 500);
 		}
 
-		return {
-			username: data.username,
-			bio: data.bio,
-			location: data.location,
-			email: data.email,
-		};
+		return this.mapUserRecordToProfile(data as UserRecord);
 	}
 
 	async changePassword(
@@ -160,9 +152,8 @@ export class UserService {
 		currentPasswordHash: string,
 		newPasswordHash: string,
 	): Promise<void> {
-		const { profile, passwordHash } = await this.getUserBySessionTokenInternal(
-			sessionToken,
-		);
+		const record = await this.getUserRecordBySessionToken(sessionToken);
+		const passwordHash = record.password_hash;
 
 		if (passwordHash !== currentPasswordHash) {
 			throw new AuthError("Invalid current password");
@@ -171,11 +162,53 @@ export class UserService {
 		const { error } = await this.supabase
 			.from("users")
 			.update({ password_hash: newPasswordHash })
-			.eq("username", profile.username);
+			.eq("username", record.username);
 
 		if (error) {
 			throw new HttpError("Failed to change password", 500);
 		}
+	}
+
+	async changeAvatar(
+		sessionToken: string,
+		avatar: ParsedBase64Image,
+		r2Bucket: Env["R2_BUCKET"],
+	): Promise<UserProfile> {
+		const record = await this.getUserRecordBySessionToken(sessionToken);
+		const newKey = `avatars/${record.username}/${crypto.randomUUID()}.${
+			avatar.extension
+		}`;
+
+		await r2Bucket.put(newKey, avatar.arrayBuffer, {
+			httpMetadata: { contentType: avatar.contentType },
+		});
+
+		if (record.r2_avatar) {
+			await r2Bucket.delete(record.r2_avatar).catch(() => {});
+		}
+
+		const { data, error } = await this.supabase
+			.from("users")
+			.update({ r2_avatar: newKey })
+			.eq("username", record.username)
+			.select("username,bio,location,email,r2_avatar")
+			.single();
+
+		if (error || !data) {
+			throw new HttpError("Failed to update avatar", 500);
+		}
+
+		return this.mapUserRecordToProfile(data as UserRecord);
+	}
+
+	private mapUserRecordToProfile(record: UserRecord): UserProfile {
+		return {
+			username: record.username,
+			bio: record.bio,
+			location: record.location,
+			email: record.email,
+			avatar_url: buildOptionalPublicR2Url(record.r2_avatar, this.env),
+		};
 	}
 }
 

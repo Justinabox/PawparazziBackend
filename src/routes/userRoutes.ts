@@ -2,9 +2,12 @@ import { AuthError, ConflictError } from "../errors";
 import { fail, handleRouteError, ok } from "../responses";
 import { getSupabaseClient } from "../supabaseClient";
 import {
+	AVATAR_IMAGE_MAX_BYTES,
 	isValidEmail,
 	isValidSha256Hex,
+	parseBase64Image,
 	parseBodyFields,
+	validateSessionToken,
 	validateUsername,
 } from "../validation";
 import { UserService } from "../services/userService";
@@ -29,7 +32,7 @@ export async function handleCheckUsernameRequest(
 		}
 
 		const supabase = getSupabaseClient(env);
-		const service = new UserService(supabase);
+		const service = new UserService(supabase, env);
 
 		const available = await service.isUsernameAvailable(username!);
 		return ok({ available });
@@ -64,7 +67,7 @@ export async function handleRegisterRequest(
 		}
 
 		const supabase = getSupabaseClient(env);
-		const service = new UserService(supabase);
+		const service = new UserService(supabase, env);
 
 		const { sessionToken } = await service.registerUser(
 			username!,
@@ -106,7 +109,7 @@ export async function handleLoginRequest(
 		}
 
 		const supabase = getSupabaseClient(env);
-		const service = new UserService(supabase);
+		const service = new UserService(supabase, env);
 
 		const { sessionToken, user } = await service.loginUser(
 			username!,
@@ -140,7 +143,7 @@ export async function handleUpdateUserRequest(
 		}
 
 		const supabase = getSupabaseClient(env);
-		const service = new UserService(supabase);
+		const service = new UserService(supabase, env);
 
 		const updatedUser = await service.updateUserProfile(
 			sessionToken,
@@ -187,11 +190,47 @@ export async function handleChangePasswordRequest(
 		}
 
 		const supabase = getSupabaseClient(env);
-		const service = new UserService(supabase);
+		const service = new UserService(supabase, env);
 
 		await service.changePassword(sessionToken, currentHash!, newHash!);
 
 		return ok({});
+	} catch (err) {
+		if (err instanceof AuthError) {
+			return fail(err.message, err.status);
+		}
+		return handleRouteError(err);
+	}
+}
+
+export async function handleChangeAvatarRequest(
+	request: Request,
+	env: Env,
+): Promise<Response> {
+	try {
+		const fields = await parseBodyFields(request);
+		const sessionToken = fields.session_token ?? null;
+		const avatarBase64 = fields.avatar_base64 ?? null;
+
+		const sessionError = validateSessionToken(sessionToken);
+		if (sessionError) {
+			return fail(sessionError, 401);
+		}
+
+		const { image, error, status } = parseBase64Image(avatarBase64, {
+			fieldName: "avatar_base64",
+			maxBytes: AVATAR_IMAGE_MAX_BYTES,
+		});
+
+		if (!image || error) {
+			return fail(error ?? "Invalid avatar_base64", status ?? 400);
+		}
+
+		const supabase = getSupabaseClient(env);
+		const service = new UserService(supabase, env);
+		const user = await service.changeAvatar(sessionToken!, image, env.R2_BUCKET);
+
+		return ok({ user });
 	} catch (err) {
 		if (err instanceof AuthError) {
 			return fail(err.message, err.status);

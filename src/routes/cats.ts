@@ -10,6 +10,7 @@ import { ok, fail, handleRouteError } from "../responses";
 import { getSupabaseClient, type SupabaseClientType } from "../supabaseClient";
 import { CatLikeService } from "../services/catLikeService";
 import { UserService } from "../services/userService";
+import { buildPublicR2Url } from "../r2";
 import {
 	parseBase64Image,
 	parseBodyFields,
@@ -359,30 +360,9 @@ function mapCatRecordToApi(row: CatRecord, env: Env): Cat {
 			latitude: row.location_latitude,
 			longitude: row.location_longitude,
 		},
-		image_url: buildCatImageUrl(row.r2_path, env),
+		image_url: buildPublicR2Url(row.r2_path, env),
 		likes: row.likes ?? 0,
 	};
-}
-
-function buildCatImageUrl(r2Path: string, env: Env): string {
-	const envWithBase = env as Env & {
-		R2_PUBLIC_BASE_URL?: string;
-		CDN_BASE_URL?: string;
-	};
-	const baseUrl =
-		envWithBase.R2_PUBLIC_BASE_URL ??
-		envWithBase.CDN_BASE_URL ??
-		"";
-	if (!baseUrl) {
-		return r2Path;
-	}
-	const normalizedBase = baseUrl.endsWith("/")
-		? baseUrl.slice(0, -1)
-		: baseUrl;
-	const normalizedPath = r2Path.startsWith("/")
-		? r2Path.slice(1)
-		: r2Path;
-	return `${normalizedBase}/${normalizedPath}`;
 }
 
 function encodeCursor(row: CatRecord): string {
@@ -469,7 +449,7 @@ async function handleCatLikeMutation(
 		}
 
 		const supabase = getSupabaseClient(env);
-		const userService = new UserService(supabase);
+		const userService = new UserService(supabase, env);
 		const likeService = new CatLikeService(supabase, userService);
 
 		const totalLikes =
