@@ -5,7 +5,13 @@ import {
 	handleRegisterRequest,
 	handleUpdateUserRequest,
 } from "./routes/userRoutes";
-import { handleCatsRequest } from "./routes/cats";
+import {
+	handleCatsRequest,
+	handleCreateCatRequest,
+	handleGetCatRequest,
+	handleListCatsRequest,
+	handleSearchCatsByTagsRequest,
+} from "./routes/cats";
 
 export async function handleRequest(
 	request: Request,
@@ -34,9 +40,25 @@ export async function handleRequest(
 		return handleChangePasswordRequest(request, env);
 	}
 
-	// Existing example route
-	if (url.pathname === "/cats") {
-		return handleCatsRequest(env);
+	// Cats routes
+	if (url.pathname === "/cats/post" && request.method === "POST") {
+		return handleCreateCatRequest(request, env);
+	}
+
+	if (url.pathname === "/cats/list" && request.method === "GET") {
+		return handleListCatsRequest(request, env);
+	}
+
+	if (url.pathname === "/cats/get" && request.method === "GET") {
+		return handleGetCatRequest(request, env);
+	}
+
+	if (url.pathname === "/cats/search/tags" && request.method === "GET") {
+		return handleSearchCatsByTagsRequest(request, env);
+	}
+
+	if (url.pathname === "/cats" && request.method === "GET") {
+		return handleCatsRequest(request, env);
 	}
 
 	// Default root response kept for tests / simple health checks

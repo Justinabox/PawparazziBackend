@@ -19,4 +19,43 @@ export type UserProfile = {
 
 export type BodyFields = Record<string, string>;
 
+export type CatLocation = {
+	latitude: number | null;
+	longitude: number | null;
+};
+
+export type Cat = {
+	id: string;
+	name: string;
+	tags: string[];
+	created_at: string;
+	username: string;
+	description: string | null;
+	location: CatLocation;
+	image_url: string;
+};
+
+export type CatRecord = {
+	id: string;
+	name: string;
+	tags: string[] | null;
+	created_at: string;
+	username: string;
+	description: string | null;
+	location_latitude: number | null;
+	location_longitude: number | null;
+	r2_path: string;
+};
+
+export type CatResponsePayload = {
+	cat: Cat;
+};
+
+export type CatListPayload = {
+	cats: Cat[];
+	next_cursor: string | null;
+};
+
+export type TagSearchMode = "any" | "all";
+
 

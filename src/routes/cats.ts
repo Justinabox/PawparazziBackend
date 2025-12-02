@@ -1,29 +1,424 @@
-import { jsonResponse } from "../responses";
-import { getSupabaseClient } from "../supabaseClient";
+import { AuthError, HttpError } from "../errors";
+import type { Cat, CatRecord, CatListPayload, CatResponsePayload } from "../models";
+import { ok, fail, handleRouteError } from "../responses";
+import { getSupabaseClient, type SupabaseClientType } from "../supabaseClient";
+import {
+	parseBase64Image,
+	parseBodyFields,
+	parseCatTags,
+	parseCoordinate,
+	parseLimitParam,
+	validateCatDescription,
+	validateCatName,
+	validateSessionToken,
+	validateTagSearchMode,
+	validateUsername,
+	isValidUuid,
+} from "../validation";
 
-export async function handleCatsRequest(env: Env): Promise<Response> {
-	const supabase = getSupabaseClient(env);
+type CursorPayload = {
+	created_at: string;
+	id: string;
+};
 
-	const { data, error } = await supabase.from("cats").select("*");
-
-	if (error) {
-		return jsonResponse(
-			{
-				success: false,
-				error: error.message,
-			},
-			500,
-		);
-	}
-
-	return jsonResponse(
-		{
-			success: true,
-			error: "",
-			cats: data ?? [],
-		},
-		200,
-	);
+export function handleCatsRequest(request: Request, env: Env): Promise<Response> {
+	// Backwards compatibility for the older /cats endpoint by delegating to the list handler.
+	return handleListCatsRequest(request, env);
 }
 
+export async function handleCreateCatRequest(
+	request: Request,
+	env: Env,
+): Promise<Response> {
+	try {
+		const fields = await parseBodyFields(request);
+		const sessionToken = fields.session_token ?? null;
+		const name = fields.name ?? null;
+		const description = fields.description ?? null;
+		const tagsRaw = fields.tags ?? null;
+		const latitudeRaw = fields.location_latitude ?? null;
+		const longitudeRaw = fields.location_longitude ?? null;
+		const imageBase64 = fields.image_base64 ?? null;
 
+		const sessionError = validateSessionToken(sessionToken);
+		if (sessionError) {
+			return fail(sessionError, 401);
+		}
+
+		const nameError = validateCatName(name);
+		if (nameError) {
+			return fail(nameError, 400);
+		}
+
+		const descriptionError = validateCatDescription(description);
+		if (descriptionError) {
+			return fail(descriptionError, 400);
+		}
+
+		const { tags, error: tagsError } = parseCatTags(tagsRaw);
+		if (tagsError) {
+			return fail(tagsError, 400);
+		}
+
+		const { value: latitude, error: latitudeError } = parseCoordinate(
+			latitudeRaw,
+			"latitude",
+		);
+		if (latitudeError) {
+			return fail(latitudeError, 400);
+		}
+
+		const { value: longitude, error: longitudeError } = parseCoordinate(
+			longitudeRaw,
+			"longitude",
+		);
+		if (longitudeError) {
+			return fail(longitudeError, 400);
+		}
+
+		const { image, error: imageError, status: imageStatus } =
+			parseBase64Image(imageBase64);
+		if (!image || imageError) {
+			return fail(imageError ?? "Invalid image_base64", imageStatus ?? 400);
+		}
+
+		const supabase = getSupabaseClient(env);
+		const username = await resolveUsernameBySessionToken(
+			supabase,
+			sessionToken!,
+		);
+
+		const catId = crypto.randomUUID();
+		const sanitizedName = name!.trim();
+		const sanitizedDescription =
+			description && description.trim().length > 0
+				? description.trim()
+				: null;
+
+		const r2Key = `cats/${catId}.${image.extension}`;
+		await env.R2_BUCKET.put(r2Key, image.arrayBuffer, {
+			httpMetadata: { contentType: image.contentType },
+		});
+
+		const { data, error } = await supabase
+			.from("cats")
+			.insert({
+				id: catId,
+				name: sanitizedName,
+				tags: tags.length ? tags : null,
+				username,
+				description: sanitizedDescription,
+				location_latitude: latitude,
+				location_longitude: longitude,
+				r2_path: r2Key,
+			})
+			.select("*")
+			.single();
+
+		if (error || !data) {
+			throw new HttpError("Failed to create cat", 500);
+		}
+
+		const cat = mapCatRecordToApi(data as CatRecord, env);
+		return ok<CatResponsePayload>({ cat }, 201);
+	} catch (err) {
+		if (err instanceof AuthError) {
+			return fail(err.message, err.status);
+		}
+		return handleRouteError(err);
+	}
+}
+
+export async function handleListCatsRequest(
+	request: Request,
+	env: Env,
+): Promise<Response> {
+	try {
+		const url = new URL(request.url);
+		const rawLimit = url.searchParams.get("limit");
+		const rawCursor = url.searchParams.get("cursor");
+		const usernameFilter = url.searchParams.get("username");
+
+		if (usernameFilter) {
+			const usernameError = validateUsername(usernameFilter);
+			if (usernameError) {
+				return fail(usernameError, 400);
+			}
+		}
+
+		const { limit, error: limitError } = parseLimitParam(rawLimit);
+		if (limitError) {
+			return fail(limitError, 400);
+		}
+
+		const { cursor, error: cursorError } = decodeCursor(rawCursor);
+		if (cursorError) {
+			return fail(cursorError, 400);
+		}
+
+		const supabase = getSupabaseClient(env);
+		let query = supabase
+			.from("cats")
+			.select("*")
+			.order("created_at", { ascending: false })
+			.order("id", { ascending: false })
+			.limit(limit + 1);
+
+		if (usernameFilter) {
+			query = query.eq("username", usernameFilter);
+		}
+
+		if (cursor) {
+			query = query.or(buildCursorClause(cursor));
+		}
+
+		const { data, error } = await query;
+		if (error) {
+			throw new HttpError("Failed to fetch cats", 500);
+		}
+
+		const rows = (data ?? []) as CatRecord[];
+		const hasMore = rows.length > limit;
+		const visibleRows = hasMore ? rows.slice(0, limit) : rows;
+		const nextCursor = hasMore ? encodeCursor(rows[limit]) : null;
+
+		const cats = visibleRows.map((row) => mapCatRecordToApi(row, env));
+		return ok<CatListPayload>({
+			cats,
+			next_cursor: nextCursor,
+		});
+	} catch (err) {
+		return handleRouteError(err);
+	}
+}
+
+export async function handleGetCatRequest(
+	request: Request,
+	env: Env,
+): Promise<Response> {
+	try {
+		const url = new URL(request.url);
+		const id = url.searchParams.get("id");
+
+		if (!id) {
+			return fail("Missing id", 400);
+		}
+
+		if (!isValidUuid(id)) {
+			return fail("Invalid id", 400);
+		}
+
+		const supabase = getSupabaseClient(env);
+		const { data, error } = await supabase
+			.from("cats")
+			.select("*")
+			.eq("id", id)
+			.maybeSingle();
+
+		if (error) {
+			throw new HttpError("Failed to load cat", 500);
+		}
+
+		if (!data) {
+			return fail("Cat not found", 404);
+		}
+
+		const cat = mapCatRecordToApi(data as CatRecord, env);
+		return ok<CatResponsePayload>({ cat });
+	} catch (err) {
+		return handleRouteError(err);
+	}
+}
+
+export async function handleSearchCatsByTagsRequest(
+	request: Request,
+	env: Env,
+): Promise<Response> {
+	try {
+		const url = new URL(request.url);
+		const tagsParam = url.searchParams.get("tags");
+		const modeParam = url.searchParams.get("mode");
+		const rawLimit = url.searchParams.get("limit");
+		const rawCursor = url.searchParams.get("cursor");
+
+		if (!tagsParam) {
+			return fail("Missing tags", 400);
+		}
+
+		const { tags, error: tagsError } = parseCatTags(tagsParam);
+		if (tagsError) {
+			return fail(tagsError, 400);
+		}
+
+		if (!tags.length) {
+			return fail("At least one tag is required", 400);
+		}
+
+		const { mode, error: modeError } = validateTagSearchMode(modeParam);
+		if (modeError) {
+			return fail(modeError, 400);
+		}
+
+		const { limit, error: limitError } = parseLimitParam(rawLimit);
+		if (limitError) {
+			return fail(limitError, 400);
+		}
+
+		const { cursor, error: cursorError } = decodeCursor(rawCursor);
+		if (cursorError) {
+			return fail(cursorError, 400);
+		}
+
+		const supabase = getSupabaseClient(env);
+		let query = supabase
+			.from("cats")
+			.select("*")
+			.order("created_at", { ascending: false })
+			.order("id", { ascending: false })
+			.limit(limit + 1);
+
+		if (mode === "all") {
+			query = query.contains("tags", tags);
+		} else {
+			query = query.overlaps("tags", tags);
+		}
+
+		if (cursor) {
+			query = query.or(buildCursorClause(cursor));
+		}
+
+		const { data, error } = await query;
+		if (error) {
+			throw new HttpError("Failed to search cats", 500);
+		}
+
+		const rows = (data ?? []) as CatRecord[];
+		const hasMore = rows.length > limit;
+		const visibleRows = hasMore ? rows.slice(0, limit) : rows;
+		const nextCursor = hasMore ? encodeCursor(rows[limit]) : null;
+		const cats = visibleRows.map((row) => mapCatRecordToApi(row, env));
+
+		return ok<CatListPayload>({
+			cats,
+			next_cursor: nextCursor,
+		});
+	} catch (err) {
+		return handleRouteError(err);
+	}
+}
+
+async function resolveUsernameBySessionToken(
+	supabase: SupabaseClientType,
+	sessionToken: string,
+): Promise<string> {
+	const { data, error } = await supabase
+		.from("users")
+		.select("username")
+		.eq("session_token", sessionToken)
+		.maybeSingle();
+
+	if (error) {
+		throw new HttpError("Failed to validate session token", 500);
+	}
+
+	if (!data) {
+		throw new AuthError("Invalid session token");
+	}
+
+	return data.username as string;
+}
+
+function mapCatRecordToApi(row: CatRecord, env: Env): Cat {
+	return {
+		id: row.id,
+		name: row.name,
+		tags: row.tags ?? [],
+		created_at: row.created_at,
+		username: row.username,
+		description: row.description,
+		location: {
+			latitude: row.location_latitude,
+			longitude: row.location_longitude,
+		},
+		image_url: buildCatImageUrl(row.r2_path, env),
+	};
+}
+
+function buildCatImageUrl(r2Path: string, env: Env): string {
+	const envWithBase = env as Env & {
+		R2_PUBLIC_BASE_URL?: string;
+		CDN_BASE_URL?: string;
+	};
+	const baseUrl =
+		envWithBase.R2_PUBLIC_BASE_URL ??
+		envWithBase.CDN_BASE_URL ??
+		"";
+	if (!baseUrl) {
+		return r2Path;
+	}
+	const normalizedBase = baseUrl.endsWith("/")
+		? baseUrl.slice(0, -1)
+		: baseUrl;
+	const normalizedPath = r2Path.startsWith("/")
+		? r2Path.slice(1)
+		: r2Path;
+	return `${normalizedBase}/${normalizedPath}`;
+}
+
+function encodeCursor(row: CatRecord): string {
+	const payload = JSON.stringify({
+		created_at: row.created_at,
+		id: row.id,
+	});
+	return base64Encode(payload);
+}
+
+function decodeCursor(
+	rawCursor: string | null,
+): { cursor: CursorPayload | null; error: string | null } {
+	if (!rawCursor) {
+		return { cursor: null, error: null };
+	}
+
+	try {
+		const json = base64Decode(rawCursor);
+		const parsed = JSON.parse(json) as Partial<CursorPayload>;
+		if (
+			typeof parsed.created_at === "string" &&
+			typeof parsed.id === "string"
+		) {
+			return {
+				cursor: {
+					created_at: parsed.created_at,
+					id: parsed.id,
+				},
+				error: null,
+			};
+		}
+		return { cursor: null, error: "Invalid cursor" };
+	} catch {
+		return { cursor: null, error: "Invalid cursor" };
+	}
+}
+
+function base64Encode(input: string): string {
+	const utf8 = new TextEncoder().encode(input);
+	let binary = "";
+	for (const byte of utf8) {
+		binary += String.fromCharCode(byte);
+	}
+	return btoa(binary);
+}
+
+function base64Decode(encoded: string): string {
+	const binary = atob(encoded);
+	const bytes = new Uint8Array(binary.length);
+	for (let i = 0; i < binary.length; i += 1) {
+		bytes[i] = binary.charCodeAt(i);
+	}
+	return new TextDecoder().decode(bytes);
+}
+
+function buildCursorClause(cursor: CursorPayload): string {
+	return `and(created_at.lt.${cursor.created_at}),and(created_at.eq.${cursor.created_at},id.lt.${cursor.id})`;
+}
