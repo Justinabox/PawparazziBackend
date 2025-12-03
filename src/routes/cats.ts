@@ -361,6 +361,20 @@ export async function handleSearchCatsByTagsRequest(
 
 		const { data, error } = await query;
 		if (error) {
+			console.error(
+				"Failed to search cats (tags search query error)",
+				JSON.stringify(
+					{
+						error,
+						mode,
+						tags,
+						cursor,
+						limit,
+					},
+					null,
+					2,
+				),
+			);
 			throw new HttpError("Failed to search cats", 500);
 		}
 
