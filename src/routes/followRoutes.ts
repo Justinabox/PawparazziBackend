@@ -10,6 +10,7 @@ import {
 } from "../validation";
 import { UserService } from "../services/userService";
 import { FollowService } from "../services/followService";
+import type { FollowEdge } from "../models";
 
 /**
  * POST /user/follow
@@ -61,7 +62,7 @@ export async function handleFollowUserRequest(
 /**
  * GET /user/listFollowers
  * Query/body: username (+ optional cursor, limit)
- * Response: { followers: FollowerSummary[]; next_cursor: string | null }
+ * Response: { followers: FollowEdge[]; next_cursor: string | null }
  */
 export async function handleListFollowersRequest(
 	request: Request,
@@ -73,14 +74,24 @@ export async function handleListFollowersRequest(
 
 		const username =
 			url.searchParams.get("username") ?? fields.username ?? null;
+		const sessionToken =
+			url.searchParams.get("session_token") ?? fields.session_token ?? null;
 		const limitParam =
 			url.searchParams.get("limit") ?? fields.limit ?? undefined;
 		const cursorParam =
 			url.searchParams.get("cursor") ?? fields.cursor ?? undefined;
 
-		const usernameError = validateUsername(username);
-		if (usernameError) {
-			return fail(usernameError, 400);
+		const sessionError = validateSessionToken(sessionToken);
+		if (sessionError) {
+			const status = sessionError === "Missing session_token" ? 401 : 400;
+			return fail(sessionError, status);
+		}
+
+		if (username) {
+			const usernameError = validateUsername(username);
+			if (usernameError) {
+				return fail(usernameError, 400);
+			}
 		}
 
 		const { limit, error: limitError } = parseLimitParam(limitParam, 25, 100);
@@ -98,11 +109,75 @@ export async function handleListFollowersRequest(
 		const followService = new FollowService(supabase, userService, env);
 
 		const { followers, nextCursor } = await followService.listFollowers(
-			username!,
+			sessionToken!,
 			{ limit, cursor },
+			username,
 		);
 
-		return ok({ followers, next_cursor: nextCursor });
+		return ok<{ followers: FollowEdge[]; next_cursor: string | null }>({
+			followers,
+			next_cursor: nextCursor,
+		});
+	} catch (err) {
+		return handleRouteError(err);
+	}
+}
+
+
+export async function handleListFollowingRequest(
+	request: Request,
+	env: Env,
+): Promise<Response> {
+	try {
+		const url = new URL(request.url);
+		const fields = await parseBodyFields(request);
+
+		const username =
+			url.searchParams.get("username") ?? fields.username ?? null;
+		const sessionToken =
+			url.searchParams.get("session_token") ?? fields.session_token ?? null;
+		const limitParam =
+			url.searchParams.get("limit") ?? fields.limit ?? undefined;
+		const cursorParam =
+			url.searchParams.get("cursor") ?? fields.cursor ?? undefined;
+
+		const sessionError = validateSessionToken(sessionToken);
+		if (sessionError) {
+			const status = sessionError === "Missing session_token" ? 401 : 400;
+			return fail(sessionError, status);
+		}
+
+		if (username) {
+			const usernameError = validateUsername(username);
+			if (usernameError) {
+				return fail(usernameError, 400);
+			}
+		}
+
+		const { limit, error: limitError } = parseLimitParam(limitParam, 25, 100);
+		if (limitError) {
+			return fail(limitError, 400);
+		}
+
+		const { cursor, error: cursorError } = parseFollowCursor(cursorParam ?? null);
+		if (cursorError) {
+			return fail(cursorError, 400);
+		}
+
+		const supabase = getSupabaseClient(env);
+		const userService = new UserService(supabase, env);
+		const followService = new FollowService(supabase, userService, env);
+
+		const { following, nextCursor } = await followService.listFollowing(
+			sessionToken!,
+			{ limit, cursor },
+			username,
+		);
+
+		return ok<{ following: FollowEdge[]; next_cursor: string | null }>({
+			following,
+			next_cursor: nextCursor,
+		});
 	} catch (err) {
 		return handleRouteError(err);
 	}

@@ -14,6 +14,9 @@ type UserRecord = {
 	location: string | null;
 	email: string;
 	r2_avatar: string | null;
+	post_count: number | string | null;
+	follower_count: number | string | null;
+	following_count: number | string | null;
 };
 
 type UserRecordWithPassword = UserRecord & { password_hash: string };
@@ -83,7 +86,9 @@ export class UserService {
 				email: normalizedEmail,
 				session_token: sessionToken,
 			})
-			.select("username,bio,location,email,r2_avatar")
+			.select(
+				"username,bio,location,email,r2_avatar,post_count,follower_count,following_count",
+			)
 			.single();
 
 		if (error || !data) {
@@ -107,7 +112,9 @@ export class UserService {
 
 		const { data, error } = await this.supabase
 			.from("users")
-			.select("username,bio,location,email,password_hash,r2_avatar")
+			.select(
+				"username,bio,location,email,password_hash,r2_avatar,post_count,follower_count,following_count",
+			)
 			.eq("email", normalizedEmail)
 			.maybeSingle();
 
@@ -140,7 +147,9 @@ export class UserService {
 	): Promise<UserRecordWithPassword> {
 		const { data, error } = await this.supabase
 			.from("users")
-			.select("username,bio,location,email,password_hash,r2_avatar")
+			.select(
+				"username,bio,location,email,password_hash,r2_avatar,post_count,follower_count,following_count",
+			)
 			.eq("session_token", sessionToken)
 			.maybeSingle();
 
@@ -172,7 +181,9 @@ export class UserService {
 			.from("users")
 			.update({ bio, location })
 			.eq("username", record.username)
-			.select("username,bio,location,email,r2_avatar")
+			.select(
+				"username,bio,location,email,r2_avatar,post_count,follower_count,following_count",
+			)
 			.single();
 
 		if (error || !data) {
@@ -226,7 +237,9 @@ export class UserService {
 			.from("users")
 			.update({ r2_avatar: newKey })
 			.eq("username", record.username)
-			.select("username,bio,location,email,r2_avatar")
+			.select(
+				"username,bio,location,email,r2_avatar,post_count,follower_count,following_count",
+			)
 			.single();
 
 		if (error || !data) {
@@ -243,6 +256,9 @@ export class UserService {
 			location: record.location,
 			email: record.email,
 			avatar_url: buildOptionalPublicR2Url(record.r2_avatar, this.env),
+			post_count: Number(record.post_count ?? 0),
+			follower_count: Number(record.follower_count ?? 0),
+			following_count: Number(record.following_count ?? 0),
 		};
 	}
 }

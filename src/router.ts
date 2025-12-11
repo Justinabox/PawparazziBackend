@@ -10,6 +10,7 @@ import {
 import {
 	handleFollowUserRequest,
 	handleListFollowersRequest,
+	handleListFollowingRequest,
 } from "./routes/followRoutes";
 import {
 	handleCatsRequest,
@@ -62,6 +63,10 @@ export async function handleRequest(
 
 	if (url.pathname === "/users/listFollowers" && request.method === "GET") {
 		return handleListFollowersRequest(request, env);
+	}
+
+	if (url.pathname === "/users/listFollowing" && request.method === "GET") {
+		return handleListFollowingRequest(request, env);
 	}
 
 	// Cats routes

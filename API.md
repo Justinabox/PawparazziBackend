@@ -22,14 +22,16 @@ This document describes every HTTP endpoint exposed by the Pawparazzi Cloudflare
 ## Domain Objects
 
 - **User** (`user` in responses):
-  - `username` (string), `bio` (nullable string), `location` (nullable string), `email` (string), `avatar_url` (nullable string pointing to the user's R2/CDN avatar).
+  - `username` (string), `bio` (nullable string), `location` (nullable string), `email` (string), `avatar_url` (nullable string pointing to the user's R2/CDN avatar), `post_count` (number), `follower_count` (number), `following_count` (number).
+- **GuestUser** (`guest_user` in responses):
+  - `username`, `bio`, `location`, `avatar_url`, `post_count`, `follower_count`, `following_count`, `is_followed` (boolean when the requester is logged in, otherwise `null`).
 - **Cat** (`cat` entries in listings or detail responses):
-  - `id` (UUID v4), `name`, `tags` (`string[]`), `created_at` (ISO timestamp), `username` (owner), `description` (nullable), `location.latitude`/`longitude` (`number | null`), `image_url` (string pointing to R2/CDN), `likes` (number), `poster_avatar_url` (nullable string pointing to the owner's avatar), `user_liked` (boolean indicating whether the requesting user has liked the post; defaults to `false` when no session token is supplied).
-- **FollowerSummary** (`followers` array items):
-  - `username`, `bio`, `location`, `avatar_url`, `followed_at` (ISO timestamp).
+  - `id` (UUID v4), `name`, `tags` (`string[]`), `created_at` (ISO timestamp), `description` (nullable), `location.latitude`/`longitude` (`number | null`), `image_url` (string pointing to R2/CDN), `likes` (number), `poster` (`GuestUser` describing the owner), `user_liked` (boolean indicating whether the requesting user has liked the post; defaults to `false` when no session token is supplied).
+- **Follower edge** (`followers`/`following` array items):
+  - `user` (`GuestUser`), `followed_at` (ISO timestamp).
 - **Pagination helpers**:
   - Cat list/search responses include `next_cursor` (base64 string encoding `{ created_at, id }`); treat as opaque.
-  - Follower listings include `next_cursor` (ISO timestamp string) to be passed back as the `cursor` query/body field.
+  - Follower/following listings include `next_cursor` (ISO timestamp string) to be passed back as the `cursor` query/body field.
 
 ## Endpoints
 
@@ -86,7 +88,10 @@ Authenticate a user and rotate their session token.
       "bio": null,
       "location": null,
       "email": "…",
-      "avatar_url": null
+      "avatar_url": null,
+      "post_count": 0,
+      "follower_count": 0,
+      "following_count": 0
     }
   }
   ```
@@ -111,7 +116,10 @@ Return the authenticated user's profile using their current session token.
       "bio": null,
       "location": null,
       "email": "catfan@example.com",
-      "avatar_url": null
+      "avatar_url": null,
+      "post_count": 0,
+      "follower_count": 0,
+      "following_count": 0
     }
   }
   ```
@@ -163,7 +171,10 @@ Upload and persist a new avatar for the authenticated user.
       "bio": null,
       "location": null,
       "email": "catfan@example.com",
-      "avatar_url": "https://cdn.example.com/avatars/catfan/abc123.jpg"
+      "avatar_url": "https://cdn.example.com/avatars/catfan/abc123.jpg",
+      "post_count": 0,
+      "follower_count": 0,
+      "following_count": 0
     }
   }
   ```
@@ -192,10 +203,11 @@ Follow or unfollow another user.
 
 #### `GET /users/listFollowers`
 
-List followers for a public profile. Authentication is not required.
+List followers for the authenticated user (you can only list your own).
 
-- **Query parameters** (can also be provided in the JSON body for backwards compatibility):
-  - `username` (required)
+- **Query parameters / body fields**:
+  - `session_token` (required)
+  - `username` (optional legacy field; if provided it must match the authenticated user)
   - `limit` (optional, defaults to 25, capped at 100)
   - `cursor` (optional ISO timestamp returned by `next_cursor`)
 - **Success** `200 OK`:
@@ -205,10 +217,16 @@ List followers for a public profile. Authentication is not required.
     "error": "",
     "followers": [
       {
-        "username": "catfan",
-        "bio": null,
-        "location": "Berlin",
-        "avatar_url": "https://cdn.example.com/avatars/catfan/avatar.jpg",
+        "user": {
+          "username": "catfan",
+          "bio": null,
+          "location": "Berlin",
+          "avatar_url": "https://cdn.example.com/avatars/catfan/avatar.jpg",
+          "post_count": 5,
+          "follower_count": 10,
+          "following_count": 3,
+          "is_followed": true
+        },
         "followed_at": "2024-05-01T12:34:56Z"
       }
     ],
@@ -216,8 +234,47 @@ List followers for a public profile. Authentication is not required.
   }
   ```
 - **Failure**:
-  - `400` invalid usernames, limit, or cursor formats
-  - `404` when the target user does not exist
+  - `401` missing/invalid session token
+  - `403` when attempting to list another user's followers
+  - `400` invalid limit or cursor formats
+  - `500` Supabase read errors
+
+#### `GET /users/listFollowing`
+
+List accounts the authenticated user follows (self only).
+
+- **Query parameters / body fields**:
+  - `session_token` (required)
+  - `username` (optional legacy field; if provided it must match the authenticated user)
+  - `limit` (optional, defaults to 25, capped at 100)
+  - `cursor` (optional ISO timestamp returned by `next_cursor`)
+- **Success** `200 OK`:
+  ```json
+  {
+    "success": true,
+    "error": "",
+    "following": [
+      {
+        "user": {
+          "username": "catguru",
+          "bio": "I like cats",
+          "location": null,
+          "avatar_url": null,
+          "post_count": 12,
+          "follower_count": 20,
+          "following_count": 8,
+          "is_followed": true
+        },
+        "followed_at": "2024-05-02T15:00:00Z"
+      }
+    ],
+    "next_cursor": null
+  }
+  ```
+- **Failure**:
+  - `401` missing/invalid session token
+  - `403` when attempting to list another user's following
+  - `400` invalid limit or cursor formats
   - `500` Supabase read errors
 
 ### Cat Endpoints
@@ -252,14 +309,36 @@ Paginated, reverse-chronological list of cat posts. `/cats` is a backwards-compa
   - `limit` (optional, default 20, max 50)
   - `cursor` (optional, opaque base64 string previously returned as `next_cursor`)
   - `username` (optional filter for posts authored by a specific user; validated same as other usernames)
-  - `session_token` (optional; when supplied, `user_liked` reflects whether this session's user has liked each returned cat)
+  - `session_token` (optional; when supplied, `user_liked` reflects whether this session's user has liked each returned cat and `poster.is_followed` reflects whether the caller follows the poster)
 - **Success** `200 OK`:
   ```json
   {
     "success": true,
     "error": "",
-    "cats": [ { "...Cat..." }, { "...Cat..." } ],
-    "next_cursor": "eyJjcmVhdGVkX2F0IjoiMjAyNC0wNS0wMVQxMjo..."} 
+    "cats": [
+      {
+        "id": "9e64d4b0-5cfe-4a6e-94e0-1d6cb2e0cabc",
+        "name": "Sleepy cat",
+        "tags": ["tabby"],
+        "created_at": "2024-05-02T15:00:00Z",
+        "description": "napping",
+        "location": { "latitude": null, "longitude": null },
+        "image_url": "https://cdn.example.com/cats/9e64d4b0.jpg",
+        "likes": 3,
+        "poster": {
+          "username": "catfan",
+          "bio": null,
+          "location": "Berlin",
+          "avatar_url": "https://cdn.example.com/avatars/catfan/avatar.jpg",
+          "post_count": 5,
+          "follower_count": 10,
+          "following_count": 3,
+          "is_followed": true
+        },
+        "user_liked": false
+      }
+    ],
+    "next_cursor": "eyJjcmVhdGVkX2F0IjoiMjAyNC0wNS0wMVQxMjo..."}
   }
   ```
 - **Failure**: `400` invalid limit/cursor/username, `500` query errors.
@@ -271,7 +350,7 @@ Fetch a single cat post by ID.
 - **Query parameters**:
   - `id` (required UUID v4)
   - `session_token` (optional; populates `user_liked` for the caller)
-- **Success** `200 OK`: `{ "success": true, "error": "", "cat": { … } }`
+- **Success** `200 OK`: `{ "success": true, "error": "", "cat": { …Cat with poster GuestUser… } }`
 - **Failure**:
   - `400` missing/invalid UUID
   - `404` cat not found

@@ -5,12 +5,14 @@ import type {
 	CatListPayload,
 	CatResponsePayload,
 	CatLikePayload,
+	GuestUser,
 } from "../models";
 import { ok, fail, handleRouteError } from "../responses";
 import { getSupabaseClient, type SupabaseClientType } from "../supabaseClient";
 import { CatLikeService } from "../services/catLikeService";
 import { UserService } from "../services/userService";
-import { buildOptionalPublicR2Url, buildPublicR2Url } from "../r2";
+import { UserMetricsService } from "../services/userMetricsService";
+import { buildPublicR2Url } from "../r2";
 import {
 	parseBase64Image,
 	parseBodyFields,
@@ -24,6 +26,7 @@ import {
 	validateUsername,
 	isValidUuid,
 } from "../validation";
+import { GuestService } from "../services/guestService";
 
 type CursorPayload = {
 	created_at: string;
@@ -96,6 +99,7 @@ export async function handleCreateCatRequest(
 			supabase,
 			sessionToken!,
 		);
+		const userMetricsService = new UserMetricsService(supabase);
 
 		const catId = crypto.randomUUID();
 		const sanitizedName = name!.trim();
@@ -109,27 +113,19 @@ export async function handleCreateCatRequest(
 			httpMetadata: { contentType: image.contentType },
 		});
 
-		const { data, error } = await supabase
-			.from("cats")
-			.insert({
-				id: catId,
-				name: sanitizedName,
-				tags: tags.length ? tags : null,
-				username,
-				description: sanitizedDescription,
-				location_latitude: latitude,
-				location_longitude: longitude,
-				r2_path: r2Key,
-			})
-			.select("*")
-			.single();
-
-		if (error || !data) {
-			throw new HttpError("Failed to create cat", 500);
-		}
+		const catRecord = await userMetricsService.createCatWithPostCount({
+			id: catId,
+			name: sanitizedName,
+			tags: tags.length ? tags : null,
+			username,
+			description: sanitizedDescription,
+			location_latitude: latitude,
+			location_longitude: longitude,
+			r2_path: r2Key,
+		});
 
 		const [cat] = await mapCatsWithMetadata(
-			[data as CatRecord],
+			[catRecord],
 			env,
 			supabase,
 			username,
@@ -441,7 +437,11 @@ async function mapCatsWithMetadata(
 	}
 
 	const uniqueUsernames = Array.from(new Set(rows.map((row) => row.username)));
-	const avatarMap = await fetchPosterAvatars(supabase, env, uniqueUsernames);
+	const guestService = new GuestService(supabase, env);
+	const guestMap = await guestService.fetchGuests(
+		uniqueUsernames,
+		sessionUsername,
+	);
 	const catIds = rows.map((row) => row.id);
 	const likedIds =
 		sessionUsername && catIds.length
@@ -450,43 +450,10 @@ async function mapCatsWithMetadata(
 
 	return rows.map((row) =>
 		mapCatRecordToApi(row, env, {
-			posterAvatarUrl: avatarMap.get(row.username) ?? null,
+			poster: guestMap.get(row.username) ?? buildFallbackGuest(row.username),
 			userLiked: likedIds.has(row.id),
 		}),
 	);
-}
-
-async function fetchPosterAvatars(
-	supabase: SupabaseClientType,
-	env: Env,
-	usernames: string[],
-): Promise<Map<string, string | null>> {
-	const avatarMap = new Map<string, string | null>();
-
-	if (!usernames.length) {
-		return avatarMap;
-	}
-
-	const { data, error } = await supabase
-		.from("users")
-		.select("username,r2_avatar")
-		.in("username", usernames);
-
-	if (error) {
-		throw new HttpError("Failed to fetch poster avatars", 500);
-	}
-
-	const rows =
-		(data ?? []) as { username: string; r2_avatar: string | null }[];
-
-	for (const row of rows) {
-		avatarMap.set(
-			row.username,
-			buildOptionalPublicR2Url(row.r2_avatar ?? null, env),
-		);
-	}
-
-	return avatarMap;
 }
 
 async function fetchUserLikedCatIds(
@@ -514,21 +481,20 @@ async function fetchUserLikedCatIds(
 }
 
 type CatRecordExtras = {
-	posterAvatarUrl?: string | null;
+	poster: GuestUser;
 	userLiked?: boolean;
 };
 
 function mapCatRecordToApi(
 	row: CatRecord,
 	env: Env,
-	extras: CatRecordExtras = {},
+	extras: CatRecordExtras,
 ): Cat {
 	return {
 		id: row.id,
 		name: row.name,
 		tags: row.tags ?? [],
 		created_at: row.created_at,
-		username: row.username,
 		description: row.description,
 		location: {
 			latitude: row.location_latitude,
@@ -536,8 +502,21 @@ function mapCatRecordToApi(
 		},
 		image_url: buildPublicR2Url(row.r2_path, env),
 		likes: row.likes ?? 0,
-		poster_avatar_url: extras.posterAvatarUrl ?? null,
+		poster: extras.poster,
 		user_liked: extras.userLiked ?? false,
+	};
+}
+
+function buildFallbackGuest(username: string): GuestUser {
+	return {
+		username,
+		bio: null,
+		location: null,
+		avatar_url: null,
+		post_count: 0,
+		follower_count: 0,
+		following_count: 0,
+		is_followed: null,
 	};
 }
 

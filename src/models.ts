@@ -16,6 +16,20 @@ export type UserProfile = {
 	location: string | null;
 	email: string;
 	avatar_url: string | null;
+	post_count: number;
+	follower_count: number;
+	following_count: number;
+};
+
+export type GuestUser = {
+	username: string;
+	bio: string | null;
+	location: string | null;
+	avatar_url: string | null;
+	post_count: number;
+	follower_count: number;
+	following_count: number;
+	is_followed: boolean | null;
 };
 
 export type BodyFields = Record<string, string>;
@@ -30,12 +44,11 @@ export type Cat = {
 	name: string;
 	tags: string[];
 	created_at: string;
-	username: string;
 	description: string | null;
 	location: CatLocation;
 	image_url: string;
 	likes: number;
-	poster_avatar_url: string | null;
+	poster: GuestUser;
 	user_liked: boolean;
 };
 
@@ -75,11 +88,8 @@ export type FollowRecord = {
 	followed_at: string;
 };
 
-export type FollowerSummary = {
-	username: string;
-	bio: string | null;
-	location: string | null;
-	avatar_url: string | null;
+export type FollowEdge = {
+	user: GuestUser;
 	followed_at: string;
 };
 
