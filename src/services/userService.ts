@@ -1,7 +1,11 @@
 import type { SupabaseClientType } from "../supabaseClient";
 import type { UserProfile } from "../models";
 import { AuthError, ConflictError, HttpError } from "../errors";
-import { generateSessionToken, type ParsedBase64Image } from "../validation";
+import {
+	generateSessionToken,
+	normalizeEmail,
+	type ParsedBase64Image,
+} from "../validation";
 import { buildOptionalPublicR2Url } from "../r2";
 
 type UserRecord = {
@@ -33,14 +37,40 @@ export class UserService {
 		return (count ?? 0) === 0;
 	}
 
+	async isEmailAvailable(email: string): Promise<boolean> {
+		const { error, count } = await this.supabase
+			.from("users")
+			.select("email", { count: "exact", head: true })
+			.eq("email", email);
+
+		if (error) {
+			throw new HttpError("Failed to check email availability", 500);
+		}
+
+		return (count ?? 0) === 0;
+	}
+
 	async registerUser(
 		username: string,
 		passwordHash: string,
 		email: string,
 	): Promise<{ sessionToken: string; user: UserProfile }> {
-		const available = await this.isUsernameAvailable(username);
-		if (!available) {
+		const normalizedEmail = normalizeEmail(email);
+		if (!normalizedEmail) {
+			throw new HttpError("Invalid email address", 500);
+		}
+
+		const [usernameAvailable, emailAvailable] = await Promise.all([
+			this.isUsernameAvailable(username),
+			this.isEmailAvailable(normalizedEmail),
+		]);
+
+		if (!usernameAvailable) {
 			throw new ConflictError("Username is already taken");
+		}
+
+		if (!emailAvailable) {
+			throw new ConflictError("Email is already registered");
 		}
 
 		const sessionToken = generateSessionToken();
@@ -50,7 +80,7 @@ export class UserService {
 			.insert({
 				username,
 				password_hash: passwordHash,
-				email,
+				email: normalizedEmail,
 				session_token: sessionToken,
 			})
 			.select("username,bio,location,email,r2_avatar")
@@ -67,13 +97,18 @@ export class UserService {
 	}
 
 	async loginUser(
-		username: string,
+		email: string,
 		passwordHash: string,
 	): Promise<{ sessionToken: string; user: UserProfile }> {
+		const normalizedEmail = normalizeEmail(email);
+		if (!normalizedEmail) {
+			throw new AuthError("Invalid email or password");
+		}
+
 		const { data, error } = await this.supabase
 			.from("users")
 			.select("username,bio,location,email,password_hash,r2_avatar")
-			.eq("username", username)
+			.eq("email", normalizedEmail)
 			.maybeSingle();
 
 		if (error) {
@@ -81,7 +116,7 @@ export class UserService {
 		}
 
 		if (!data || data.password_hash !== passwordHash) {
-			throw new AuthError("Invalid username or password");
+			throw new AuthError("Invalid email or password");
 		}
 
 		const sessionToken = generateSessionToken();
@@ -89,7 +124,7 @@ export class UserService {
 		const { error: updateError } = await this.supabase
 			.from("users")
 			.update({ session_token: sessionToken })
-			.eq("username", username);
+			.eq("email", normalizedEmail);
 
 		if (updateError) {
 			throw new HttpError("Failed to create session token", 500);

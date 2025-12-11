@@ -43,6 +43,11 @@ export function isValidEmail(email: string | null | undefined): boolean {
 	return re.test(email);
 }
 
+export function normalizeEmail(email: string | null | undefined): string | null {
+	if (!email) return null;
+	return email.trim().toLowerCase();
+}
+
 export function isValidSha256Hex(hash: string | null | undefined): boolean {
 	if (!hash) return false;
 	return /^[a-f0-9]{64}$/i.test(hash);

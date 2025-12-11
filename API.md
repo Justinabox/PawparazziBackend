@@ -60,21 +60,21 @@ Create a new user and issue a session token.
 - **Body fields**:
   - `username` (string, 4–32 chars)
   - `passwd_hash` (string, 64-char SHA-256 hex)
-  - `email` (valid email address)
+  - `email` (valid email address; automatically lower-cased before storage)
 - **Success** `200 OK`:
   ```json
   { "success": true, "error": "", "session_token": "…" }
   ```
 - **Failure**:
   - `400` for validation issues (invalid username/email/hash)
-  - `409` when the username is already taken
+  - `409` when the username or email is already registered
   - `500` for storage errors
 
 #### `POST /users/login`
 
 Authenticate a user and rotate their session token.
 
-- **Body fields**: `username`, `passwd_hash` (same format as registration).
+- **Body fields**: `email`, `passwd_hash` (same format as registration; email is normalized to lowercase before verification).
 - **Success** `200 OK`:
   ```json
   {
@@ -91,7 +91,7 @@ Authenticate a user and rotate their session token.
   }
   ```
 - **Failure**:
-  - `400` invalid username format or malformed hash
+  - `400` invalid email format or malformed hash
   - `401` invalid credentials
   - `500` Supabase errors
 

@@ -5,6 +5,7 @@ import {
 	AVATAR_IMAGE_MAX_BYTES,
 	isValidEmail,
 	isValidSha256Hex,
+	normalizeEmail,
 	parseBase64Image,
 	parseBodyFields,
 	validateSessionToken,
@@ -80,7 +81,7 @@ export async function handleRegisterRequest(
 		const fields = await parseBodyFields(request);
 		const username = fields.username ?? null;
 		const passwordHash = fields.passwd_hash ?? null;
-		const email = fields.email ?? null;
+		const email = normalizeEmail(fields.email ?? null);
 
 		const usernameError = validateUsername(username);
 		if (usernameError) {
@@ -93,6 +94,10 @@ export async function handleRegisterRequest(
 			});
 		}
 
+		if (!email) {
+			return fail("Invalid email address", 400, { session_token: "" });
+		}
+
 		if (!isValidEmail(email)) {
 			return fail("Invalid email address", 400, { session_token: "" });
 		}
@@ -103,7 +108,7 @@ export async function handleRegisterRequest(
 		const { sessionToken } = await service.registerUser(
 			username!,
 			passwordHash!,
-			email!,
+			email,
 		);
 
 		return ok({ session_token: sessionToken });
@@ -121,12 +126,18 @@ export async function handleLoginRequest(
 ): Promise<Response> {
 	try {
 		const fields = await parseBodyFields(request);
-		const username = fields.username ?? null;
+		const email = normalizeEmail(fields.email ?? null);
 		const passwordHash = fields.passwd_hash ?? null;
 
-		const usernameError = validateUsername(username);
-		if (usernameError) {
-			return fail(usernameError, 400, {
+		if (!email) {
+			return fail("Invalid email address", 400, {
+				session_token: "",
+				user: null,
+			});
+		}
+
+		if (!isValidEmail(email)) {
+			return fail("Invalid email address", 400, {
 				session_token: "",
 				user: null,
 			});
@@ -142,10 +153,7 @@ export async function handleLoginRequest(
 		const supabase = getSupabaseClient(env);
 		const service = new UserService(supabase, env);
 
-		const { sessionToken, user } = await service.loginUser(
-			username!,
-			passwordHash!,
-		);
+		const { sessionToken, user } = await service.loginUser(email, passwordHash!);
 
 		return ok({ session_token: sessionToken, user });
 	} catch (err) {
