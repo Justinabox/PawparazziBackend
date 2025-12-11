@@ -21,6 +21,15 @@ import {
 	handleListCatsRequest,
 	handleSearchCatsByTagsRequest,
 } from "./routes/cats";
+import {
+	handleAddCatToCollectionRequest,
+	handleCreateCollectionRequest,
+	handleDeleteCollectionRequest,
+	handleGetCollectionRequest,
+	handleListCollectionsRequest,
+	handleRemoveCatFromCollectionRequest,
+	handleUpdateCollectionRequest,
+} from "./routes/collections";
 
 export async function handleRequest(
 	request: Request,
@@ -96,6 +105,35 @@ export async function handleRequest(
 
 	if (url.pathname === "/cats" && request.method === "GET") {
 		return handleCatsRequest(request, env);
+	}
+
+	// Collection routes
+	if (url.pathname === "/collections/create" && request.method === "POST") {
+		return handleCreateCollectionRequest(request, env);
+	}
+
+	if (url.pathname === "/collections/list" && request.method === "GET") {
+		return handleListCollectionsRequest(request, env);
+	}
+
+	if (url.pathname === "/collections/get" && request.method === "GET") {
+		return handleGetCollectionRequest(request, env);
+	}
+
+	if (url.pathname === "/collections/update" && request.method === "POST") {
+		return handleUpdateCollectionRequest(request, env);
+	}
+
+	if (url.pathname === "/collections/delete" && request.method === "POST") {
+		return handleDeleteCollectionRequest(request, env);
+	}
+
+	if (url.pathname === "/collections/addCat" && request.method === "POST") {
+		return handleAddCatToCollectionRequest(request, env);
+	}
+
+	if (url.pathname === "/collections/removeCat" && request.method === "POST") {
+		return handleRemoveCatFromCollectionRequest(request, env);
 	}
 
 	// Default root response kept for tests / simple health checks

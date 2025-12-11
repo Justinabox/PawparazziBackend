@@ -12,6 +12,7 @@ import {
 	validateUsername,
 } from "../validation";
 import { UserService } from "../services/userService";
+import { GuestService } from "../services/guestService";
 
 export async function handleGetUserProfileRequest(
 	request: Request,
@@ -20,10 +21,12 @@ export async function handleGetUserProfileRequest(
 	try {
 		const url = new URL(request.url);
 		let sessionToken = url.searchParams.get("session_token");
+		let targetUsername = url.searchParams.get("username");
 
 		if (!sessionToken) {
 			const fields = await parseBodyFields(request);
 			sessionToken = fields.session_token ?? null;
+			targetUsername = targetUsername ?? fields.username ?? null;
 		}
 
 		const sessionError = validateSessionToken(sessionToken);
@@ -33,9 +36,29 @@ export async function handleGetUserProfileRequest(
 
 		const supabase = getSupabaseClient(env);
 		const service = new UserService(supabase, env);
-		const user = await service.getUserBySessionToken(sessionToken!);
+		const requester = await service.getUserBySessionToken(sessionToken!);
 
-		return ok({ user });
+		if (targetUsername) {
+			const usernameError = validateUsername(targetUsername);
+			if (usernameError) {
+				return fail(usernameError, 400, { user: null });
+			}
+		}
+
+		if (targetUsername && targetUsername !== requester.username) {
+			const guestService = new GuestService(supabase, env);
+			const guestMap = await guestService.fetchGuests(
+				[targetUsername],
+				requester.username,
+			);
+			const guest = guestMap.get(targetUsername);
+			if (!guest) {
+				return fail("User not found", 404, { user: null });
+			}
+			return ok({ user: guest });
+		}
+
+		return ok({ user: requester });
 	} catch (err) {
 		if (err instanceof AuthError) {
 			return fail(err.message, err.status, { user: null });

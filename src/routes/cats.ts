@@ -1,18 +1,11 @@
 import { AuthError, HttpError } from "../errors";
-import type {
-	Cat,
-	CatRecord,
-	CatListPayload,
-	CatResponsePayload,
-	CatLikePayload,
-	GuestUser,
-} from "../models";
+import type { Cat, CatRecord, CatListPayload, CatResponsePayload, CatLikePayload } from "../models";
 import { ok, fail, handleRouteError } from "../responses";
 import { getSupabaseClient, type SupabaseClientType } from "../supabaseClient";
 import { CatLikeService } from "../services/catLikeService";
 import { UserService } from "../services/userService";
 import { UserMetricsService } from "../services/userMetricsService";
-import { buildPublicR2Url } from "../r2";
+import { mapCatRecordsWithMetadata } from "../services/catMappingService";
 import {
 	parseBase64Image,
 	parseBodyFields,
@@ -26,7 +19,6 @@ import {
 	validateUsername,
 	isValidUuid,
 } from "../validation";
-import { GuestService } from "../services/guestService";
 
 type CursorPayload = {
 	created_at: string;
@@ -124,7 +116,7 @@ export async function handleCreateCatRequest(
 			r2_path: r2Key,
 		});
 
-		const [cat] = await mapCatsWithMetadata(
+		const [cat] = await mapCatRecordsWithMetadata(
 			[catRecord],
 			env,
 			supabase,
@@ -208,7 +200,7 @@ export async function handleListCatsRequest(
 		const visibleRows = hasMore ? rows.slice(0, limit) : rows;
 		const nextCursor = hasMore ? encodeCursor(rows[limit]) : null;
 
-		const cats = await mapCatsWithMetadata(
+		const cats = await mapCatRecordsWithMetadata(
 			visibleRows,
 			env,
 			supabase,
@@ -270,7 +262,7 @@ export async function handleGetCatRequest(
 			return fail("Cat not found", 404);
 		}
 
-		const [cat] = await mapCatsWithMetadata(
+		const [cat] = await mapCatRecordsWithMetadata(
 			[data as CatRecord],
 			env,
 			supabase,
@@ -378,7 +370,7 @@ export async function handleSearchCatsByTagsRequest(
 		const hasMore = rows.length > limit;
 		const visibleRows = hasMore ? rows.slice(0, limit) : rows;
 		const nextCursor = hasMore ? encodeCursor(rows[limit]) : null;
-		const cats = await mapCatsWithMetadata(
+		const cats = await mapCatRecordsWithMetadata(
 			visibleRows,
 			env,
 			supabase,
@@ -424,100 +416,6 @@ async function resolveUsernameBySessionToken(
 	}
 
 	return data.username as string;
-}
-
-async function mapCatsWithMetadata(
-	rows: CatRecord[],
-	env: Env,
-	supabase: SupabaseClientType,
-	sessionUsername: string | null,
-): Promise<Cat[]> {
-	if (!rows.length) {
-		return [];
-	}
-
-	const uniqueUsernames = Array.from(new Set(rows.map((row) => row.username)));
-	const guestService = new GuestService(supabase, env);
-	const guestMap = await guestService.fetchGuests(
-		uniqueUsernames,
-		sessionUsername,
-	);
-	const catIds = rows.map((row) => row.id);
-	const likedIds =
-		sessionUsername && catIds.length
-			? await fetchUserLikedCatIds(supabase, sessionUsername, catIds)
-			: new Set<string>();
-
-	return rows.map((row) =>
-		mapCatRecordToApi(row, env, {
-			poster: guestMap.get(row.username) ?? buildFallbackGuest(row.username),
-			userLiked: likedIds.has(row.id),
-		}),
-	);
-}
-
-async function fetchUserLikedCatIds(
-	supabase: SupabaseClientType,
-	username: string,
-	catIds: string[],
-): Promise<Set<string>> {
-	if (!catIds.length) {
-		return new Set<string>();
-	}
-
-	const { data, error } = await supabase
-		.from("likes")
-		.select("cat_id")
-		.eq("username", username)
-		.in("cat_id", catIds);
-
-	if (error) {
-		throw new HttpError("Failed to fetch liked cats", 500);
-	}
-
-	const likedRows = (data ?? []) as { cat_id: string }[];
-
-	return new Set(likedRows.map((row) => row.cat_id));
-}
-
-type CatRecordExtras = {
-	poster: GuestUser;
-	userLiked?: boolean;
-};
-
-function mapCatRecordToApi(
-	row: CatRecord,
-	env: Env,
-	extras: CatRecordExtras,
-): Cat {
-	return {
-		id: row.id,
-		name: row.name,
-		tags: row.tags ?? [],
-		created_at: row.created_at,
-		description: row.description,
-		location: {
-			latitude: row.location_latitude,
-			longitude: row.location_longitude,
-		},
-		image_url: buildPublicR2Url(row.r2_path, env),
-		likes: row.likes ?? 0,
-		poster: extras.poster,
-		user_liked: extras.userLiked ?? false,
-	};
-}
-
-function buildFallbackGuest(username: string): GuestUser {
-	return {
-		username,
-		bio: null,
-		location: null,
-		avatar_url: null,
-		post_count: 0,
-		follower_count: 0,
-		following_count: 0,
-		is_followed: null,
-	};
 }
 
 function encodeCursor(row: CatRecord): string {

@@ -24,13 +24,16 @@ This document describes every HTTP endpoint exposed by the Pawparazzi Cloudflare
 - **User** (`user` in responses):
   - `username` (string), `bio` (nullable string), `location` (nullable string), `email` (string), `avatar_url` (nullable string pointing to the user's R2/CDN avatar), `post_count` (number), `follower_count` (number), `following_count` (number).
 - **GuestUser** (`guest_user` in responses):
-  - `username`, `bio`, `location`, `avatar_url`, `post_count`, `follower_count`, `following_count`, `is_followed` (boolean when the requester is logged in, otherwise `null`).
+  - `username`, `bio`, `location`, `avatar_url`, `post_count`, `follower_count`, `following_count`, `is_followed` (boolean when the requester is logged in, otherwise `null`), `collections` (first 10 `Collection` objects owned by the guest), `collections_next_cursor` (base64 cursor to continue listing via `/collections/list`).
 - **Cat** (`cat` entries in listings or detail responses):
   - `id` (UUID v4), `name`, `tags` (`string[]`), `created_at` (ISO timestamp), `description` (nullable), `location.latitude`/`longitude` (`number | null`), `image_url` (string pointing to R2/CDN), `likes` (number), `poster` (`GuestUser` describing the owner), `user_liked` (boolean indicating whether the requesting user has liked the post; defaults to `false` when no session token is supplied).
 - **Follower edge** (`followers`/`following` array items):
   - `user` (`GuestUser`), `followed_at` (ISO timestamp).
+- **Collection** (`collection` in responses):
+  - `id` (UUID v4), `owner` (`GuestUser`), `name` (string unique per owner), `description` (nullable string), `cat_count` (number of saved cats), `created_at` (ISO timestamp).
 - **Pagination helpers**:
   - Cat list/search responses include `next_cursor` (base64 string encoding `{ created_at, id }`); treat as opaque.
+  - Collection listings include `next_cursor` (base64 string encoding `{ created_at, id }`) for `/collections/list` and `collections_next_cursor` inside `GuestUser`.
   - Follower/following listings include `next_cursor` (ISO timestamp string) to be passed back as the `cursor` query/body field.
 
 ## Endpoints
@@ -102,10 +105,11 @@ Authenticate a user and rotate their session token.
 
 #### `GET /users/profile`
 
-Return the authenticated user's profile using their current session token.
+Return a profile. For the caller's own username this returns a full `User`; for any other username it returns a `GuestUser`.
 
 - **Query parameters / body fields**:
   - `session_token` (required). You may supply this either as a `session_token` query parameter or inside a JSON body.
+  - `username` (optional). If provided and different from the session owner, the response is a `GuestUser`; otherwise it is a `User`.
 - **Success** `200 OK`:
   ```json
   {
@@ -123,8 +127,11 @@ Return the authenticated user's profile using their current session token.
     }
   }
   ```
+  When requesting another user's profile, `user` is a `GuestUser` (includes `is_followed`, `collections`, and `collections_next_cursor`).
 - **Failure**:
   - `401` missing/invalid session token
+  - `400` invalid username (when provided)
+  - `404` target user not found
   - `500` Supabase read errors
 
 #### `POST /users/update`
@@ -395,6 +402,102 @@ The inverse of `/cats/like`; removes the caller's like.
 - **Body fields**: same as `/cats/like`.
 - **Success** `200 OK`: identical payload with `"liked": false`.
 - **Failure**: same as `/cats/like`.
+
+### Collection Endpoints
+
+Collections are always public; collection names are unique per owner, and each collection tracks a stored `cat_count` reflecting saved posts.
+
+#### `POST /collections/create`
+
+Create a collection for the authenticated user.
+
+- **Body fields**:
+  - `session_token` (required)
+  - `name` (required, <= 100 characters, unique per owner)
+  - `description` (optional, <= 500 characters)
+- **Success** `201 Created`: `{ "success": true, "error": "", "collection": { "...see Collection shape..." } }`
+- **Failure**:
+  - `401` invalid session token
+  - `400` invalid name/description
+  - `409` duplicate name for this owner
+  - `500` storage errors
+
+#### `GET /collections/list`
+
+List all collections for a given user (public).
+
+- **Query parameters**:
+  - `username` (required; same validation as other usernames)
+  - `limit` (optional; default 10, max 50)
+  - `cursor` (optional base64 string from `next_cursor`; encodes `{ created_at, id }`)
+- **Success** `200 OK`: `{ "success": true, "error": "", "collections": [ { "...Collection..." } ], "next_cursor": null }` (each `collection.owner` is a `GuestUser`)
+- **Failure**: `400` invalid/missing username or cursor; `500` read errors
+
+#### `GET /collections/get`
+
+Fetch a collection plus its saved cats (paginated).
+
+- **Query parameters**:
+  - `collection_id` (required UUID v4)
+  - `limit` (optional, default 20, max 50)
+  - `cursor` (optional base64 string returned as `next_cursor`; encodes `{ added_at, cat_id }`)
+  - `session_token` (optional; when supplied, cat `user_liked` reflects this session)
+- **Success** `200 OK`:
+  ```json
+  {
+    "success": true,
+    "error": "",
+    "collection": { "...Collection..." },
+    "cats": [ { "...Cat..." } ],
+    "next_cursor": null
+  }
+  ```
+- **Failure**:
+  - `400` invalid/missing parameters or cursor
+  - `404` collection not found
+  - `500` Supabase errors
+
+#### `POST /collections/update`
+
+Rename or edit the description of a collection (owner only).
+
+- **Body fields**:
+  - `session_token` (required)
+  - `collection_id` (required UUID v4)
+  - `name` (optional, <= 100 chars)
+  - `description` (optional, <= 500 chars; send `null` or empty to clear)
+- **Success** `200 OK`: `{ "success": true, "error": "", "collection": { "...Collection..." } }`
+- **Failure**:
+  - `401` invalid session token
+  - `400` invalid ids/name/description
+  - `403` when updating a collection you do not own
+  - `404` collection not found
+  - `409` duplicate name for this owner
+  - `500` write errors
+
+#### `POST /collections/delete`
+
+Delete a collection and its saved-cat links (owner only).
+
+- **Body fields**: `session_token` (required), `collection_id` (required UUID v4)
+- **Success** `200 OK`: `{ "success": true, "error": "" }`
+- **Failure**: `401` invalid session token; `400` invalid id; `404` collection not found; `500` deletion errors
+
+#### `POST /collections/addCat`
+
+Save a cat post into one of the caller's collections.
+
+- **Body fields**: `session_token` (required), `collection_id` (required UUID v4), `cat_id` (required UUID v4)
+- **Success** `200 OK`: `{ "success": true, "error": "", "collection_id": "…", "cat_count": 3 }`
+- **Failure**: `401` invalid session token; `400` invalid ids; `403` when targeting another user's collection; `404` collection or cat not found; `500` write errors
+
+#### `POST /collections/removeCat`
+
+Remove a saved cat from the caller's collection.
+
+- **Body fields**: same as `/collections/addCat`
+- **Success** `200 OK`: `{ "success": true, "error": "", "collection_id": "…", "cat_count": 2 }`
+- **Failure**: same classes as `/collections/addCat`
 
 ## Error Handling Reference
 

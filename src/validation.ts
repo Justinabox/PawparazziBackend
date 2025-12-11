@@ -6,6 +6,8 @@ export const CAT_TAGS_MAX = 10;
 export const CAT_TAG_MAX_LENGTH = 32;
 export const CAT_IMAGE_MAX_BYTES = 10 * 1024 * 1024; // 10MB
 export const AVATAR_IMAGE_MAX_BYTES = 5 * 1024 * 1024; // 5MB
+export const COLLECTION_NAME_MAX_LENGTH = 100;
+export const COLLECTION_DESCRIPTION_MAX_LENGTH = 500;
 
 const ALLOWED_IMAGE_MIME_TYPES = [
 	"image/jpeg",
@@ -110,6 +112,34 @@ export function validateCatDescription(
 
 	if (description.length > CAT_DESCRIPTION_MAX_LENGTH) {
 		return `Description must be <= ${CAT_DESCRIPTION_MAX_LENGTH} characters`;
+	}
+
+	return null;
+}
+
+export function validateCollectionName(
+	name: string | null | undefined,
+): string | null {
+	if (!name || !name.trim()) {
+		return "Missing name";
+	}
+
+	if (name.length > COLLECTION_NAME_MAX_LENGTH) {
+		return `Name must be <= ${COLLECTION_NAME_MAX_LENGTH} characters`;
+	}
+
+	return null;
+}
+
+export function validateCollectionDescription(
+	description: string | null | undefined,
+): string | null {
+	if (!description) {
+		return null;
+	}
+
+	if (description.length > COLLECTION_DESCRIPTION_MAX_LENGTH) {
+		return `Description must be <= ${COLLECTION_DESCRIPTION_MAX_LENGTH} characters`;
 	}
 
 	return null;

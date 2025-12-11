@@ -30,6 +30,8 @@ export type GuestUser = {
 	follower_count: number;
 	following_count: number;
 	is_followed: boolean | null;
+	collections: Collection[];
+	collections_next_cursor: string | null;
 };
 
 export type BodyFields = Record<string, string>;
@@ -91,6 +93,47 @@ export type FollowRecord = {
 export type FollowEdge = {
 	user: GuestUser;
 	followed_at: string;
+};
+
+export type CollectionRow = {
+	id: string;
+	owner_username: string;
+	name: string;
+	description: string | null;
+	is_public: boolean;
+	cat_count: number | string | null;
+	created_at: string;
+	updated_at: string;
+};
+
+export type Collection = {
+	id: string;
+	owner: GuestUser;
+	name: string;
+	description: string | null;
+	cat_count: number;
+	created_at: string;
+};
+
+export type CollectionRecord = Collection & {
+	is_public: boolean;
+	updated_at: string;
+};
+
+export type CollectionListPayload = {
+	collections: Collection[];
+	next_cursor: string | null;
+};
+
+export type CollectionDetailPayload = {
+	collection: Collection;
+	cats: Cat[];
+	next_cursor: string | null;
+};
+
+export type CollectionCountPayload = {
+	collection_id: string;
+	cat_count: number;
 };
 
 

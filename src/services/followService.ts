@@ -184,6 +184,8 @@ export class FollowService {
 			follower_count: 0,
 			following_count: 0,
 			is_followed: null,
+			collections: [],
+			collections_next_cursor: null,
 		};
 	}
 }

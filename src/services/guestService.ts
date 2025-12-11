@@ -1,4 +1,6 @@
-import type { GuestUser } from "../models";
+import type { Collection, CollectionRow, GuestUser } from "../models";
+import { CollectionService } from "./collectionService";
+import { UserService } from "./userService";
 import type { SupabaseClientType } from "../supabaseClient";
 import { buildOptionalPublicR2Url } from "../r2";
 import { HttpError } from "../errors";
@@ -7,6 +9,10 @@ export class GuestService {
 	constructor(
 		private readonly supabase: SupabaseClientType,
 		private readonly env: Env,
+		private readonly collectionService = new CollectionService(
+			supabase,
+			new UserService(supabase, env),
+		),
 	) {}
 
 	async fetchGuests(
@@ -47,8 +53,12 @@ export class GuestService {
 				is_followed: sessionUsername
 					? followedSet.has(row.username)
 					: null,
+				collections: [],
+				collections_next_cursor: null,
 			});
 		}
+
+		await this.populateCollections(guestMap);
 
 		return guestMap;
 	}
@@ -68,5 +78,45 @@ export class GuestService {
 		}
 
 		return new Set((data ?? []).map((row) => row.followee_username as string));
+	}
+
+	private async populateCollections(
+		guestMap: Map<string, GuestUser>,
+	): Promise<void> {
+		const entries = Array.from(guestMap.entries());
+		for (const [username, guest] of entries) {
+			const { rows, nextCursor } = await this.collectionService.listCollectionsForUser(
+				username,
+				{ limit: 10, cursor: null },
+			);
+			const ownerGuest = this.buildCollectionOwner(guest);
+			const collections = rows.map((row) =>
+				this.mapCollectionRowToApi(row, ownerGuest),
+			);
+			guest.collections = collections;
+			guest.collections_next_cursor = nextCursor;
+		}
+	}
+
+	private buildCollectionOwner(guest: GuestUser): GuestUser {
+		return {
+			...guest,
+			collections: [],
+			collections_next_cursor: null,
+		};
+	}
+
+	private mapCollectionRowToApi(
+		row: CollectionRow,
+		owner: GuestUser,
+	): Collection {
+		return {
+			id: row.id,
+			owner,
+			name: row.name,
+			description: row.description,
+			cat_count: Number(row.cat_count ?? 0),
+			created_at: row.created_at,
+		};
 	}
 }
