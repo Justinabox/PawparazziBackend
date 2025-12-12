@@ -82,6 +82,24 @@ export type CatLikePayload = {
 	liked: boolean;
 };
 
+export type Comment = {
+	comment_id: string;
+	cat_id: string;
+	comment: string;
+	comment_at: string;
+	user: GuestUser;
+	is_owner: boolean;
+};
+
+export type CommentResponsePayload = {
+	comment: Comment;
+};
+
+export type CommentListPayload = {
+	comments: Comment[];
+	next_page: number | null;
+};
+
 export type TagSearchMode = "any" | "all";
 
 export type FollowRecord = {

@@ -8,6 +8,7 @@ export const CAT_IMAGE_MAX_BYTES = 10 * 1024 * 1024; // 10MB
 export const AVATAR_IMAGE_MAX_BYTES = 5 * 1024 * 1024; // 5MB
 export const COLLECTION_NAME_MAX_LENGTH = 100;
 export const COLLECTION_DESCRIPTION_MAX_LENGTH = 500;
+export const COMMENT_MAX_LENGTH = 500;
 
 const ALLOWED_IMAGE_MIME_TYPES = [
 	"image/jpeg",
@@ -145,6 +146,25 @@ export function validateCollectionDescription(
 	return null;
 }
 
+export function validateComment(
+	comment: string | null | undefined,
+): string | null {
+	if (comment === null || comment === undefined) {
+		return "Missing comment";
+	}
+
+	const trimmed = comment.trim();
+	if (!trimmed) {
+		return "Comment cannot be empty";
+	}
+
+	if (trimmed.length > COMMENT_MAX_LENGTH) {
+		return `Comment must be <= ${COMMENT_MAX_LENGTH} characters`;
+	}
+
+	return null;
+}
+
 export function parseCatTags(
 	rawTags: string | null | undefined,
 ): { tags: string[]; error: string | null } {
@@ -212,6 +232,22 @@ export function parseLimitParam(
 	}
 
 	return { limit: Math.min(parsed, maxValue), error: null };
+}
+
+export function parsePageParam(
+	rawPage: string | null | undefined,
+	defaultValue = 1,
+): { page: number; error: string | null } {
+	if (!rawPage) {
+		return { page: defaultValue, error: null };
+	}
+
+	const parsed = Number.parseInt(rawPage, 10);
+	if (Number.isNaN(parsed) || parsed <= 0) {
+		return { page: defaultValue, error: "Invalid page" };
+	}
+
+	return { page: parsed, error: null };
 }
 
 export function validateTagSearchMode(

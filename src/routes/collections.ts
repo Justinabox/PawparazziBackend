@@ -211,7 +211,7 @@ export async function handleGetCollectionRequest(
 			throw new HttpError("Failed to list collection cats", 500);
 		}
 
-		const rows = (data ?? []) as CollectionCatRow[];
+		const rows = (data ?? []) as unknown as CollectionCatRow[];
 		const hasMore = rows.length > limit;
 		const visibleRows = hasMore ? rows.slice(0, limit) : rows;
 		const nextCursor = hasMore ? encodeCollectionCursor(rows[limit]) : null;
@@ -514,3 +514,5 @@ function base64Decode(encoded: string): string {
 function buildCollectionCursorClause(cursor: CollectionCursorPayload): string {
 	return `and(added_at.lt.${cursor.added_at}),and(added_at.eq.${cursor.added_at},cat_id.lt.${cursor.cat_id})`;
 }
+
+

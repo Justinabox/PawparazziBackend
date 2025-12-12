@@ -30,6 +30,11 @@ import {
 	handleRemoveCatFromCollectionRequest,
 	handleUpdateCollectionRequest,
 } from "./routes/collections";
+import {
+	handleAddCommentRequest,
+	handleDeleteCommentRequest,
+	handleListCommentsRequest,
+} from "./routes/comments";
 
 export async function handleRequest(
 	request: Request,
@@ -101,6 +106,18 @@ export async function handleRequest(
 
 	if (url.pathname === "/cats/removeLike" && request.method === "POST") {
 		return handleRemoveLikeCatRequest(request, env);
+	}
+
+	if (url.pathname === "/cats/comments/add" && request.method === "POST") {
+		return handleAddCommentRequest(request, env);
+	}
+
+	if (url.pathname === "/cats/comments/list" && request.method === "GET") {
+		return handleListCommentsRequest(request, env);
+	}
+
+	if (url.pathname === "/cats/comments/delete" && request.method === "POST") {
+		return handleDeleteCommentRequest(request, env);
 	}
 
 	if (url.pathname === "/cats" && request.method === "GET") {

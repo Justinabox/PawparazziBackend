@@ -27,6 +27,8 @@ This document describes every HTTP endpoint exposed by the Pawparazzi Cloudflare
   - `username`, `bio`, `location`, `avatar_url`, `post_count`, `follower_count`, `following_count`, `is_followed` (boolean when the requester is logged in, otherwise `null`), `collections` (first 10 `Collection` objects owned by the guest), `collections_next_cursor` (base64 cursor to continue listing via `/collections/list`).
 - **Cat** (`cat` entries in listings or detail responses):
   - `id` (UUID v4), `name`, `tags` (`string[]`), `created_at` (ISO timestamp), `description` (nullable), `location.latitude`/`longitude` (`number | null`), `image_url` (string pointing to R2/CDN), `likes` (number), `poster` (`GuestUser` describing the owner), `user_liked` (boolean indicating whether the requesting user has liked the post; defaults to `false` when no session token is supplied).
+- **Comment** (`comment` in responses):
+  - `comment_id` (UUID v4), `cat_id` (UUID v4), `comment` (string up to 500 chars), `comment_at` (ISO timestamp), `user` (`GuestUser` of the author), `is_owner` (boolean; `true` when the requester is the author and supplied a valid `session_token`, otherwise `false`).
 - **Follower edge** (`followers`/`following` array items):
   - `user` (`GuestUser`), `followed_at` (ISO timestamp).
 - **Collection** (`collection` in responses):
@@ -35,6 +37,7 @@ This document describes every HTTP endpoint exposed by the Pawparazzi Cloudflare
   - Cat list/search responses include `next_cursor` (base64 string encoding `{ created_at, id }`); treat as opaque.
   - Collection listings include `next_cursor` (base64 string encoding `{ created_at, id }`) for `/collections/list` and `collections_next_cursor` inside `GuestUser`.
   - Follower/following listings include `next_cursor` (ISO timestamp string) to be passed back as the `cursor` query/body field.
+  - Comment listings include `next_page` (integer page number) or `null` when no further pages; pagination uses `page` (1-based, default 1) and `limit` (default 20, max 50).
 
 ## Endpoints
 
@@ -402,6 +405,72 @@ The inverse of `/cats/like`; removes the caller's like.
 - **Body fields**: same as `/cats/like`.
 - **Success** `200 OK`: identical payload with `"liked": false`.
 - **Failure**: same as `/cats/like`.
+
+#### `POST /cats/comments/add`
+
+Create a comment on a cat. Requires authentication.
+
+- **Body fields**:
+  - `session_token` (required)
+  - `cat_id` (required UUID v4)
+  - `comment` (required string, trimmed, 1–500 chars)
+- **Success** `201 Created`:
+  ```json
+  { "success": true, "error": "", "comment": { "...Comment shape..." } }
+  ```
+- **Failure**:
+  - `401` missing/invalid session token
+  - `400` missing/invalid `cat_id` or comment text
+  - `404` cat not found
+  - `500` write errors
+
+#### `GET /cats/comments/list`
+
+List comments for a cat, newest first.
+
+- **Query parameters**:
+  - `cat_id` (required UUID v4)
+  - `page` (optional, 1-based; default 1)
+  - `limit` (optional; default 20, max 50)
+  - `session_token` (optional; when provided, `is_owner` reflects whether the caller authored each comment and `user.is_followed` is populated)
+- **Success** `200 OK`:
+  ```json
+  {
+    "success": true,
+    "error": "",
+    "comments": [
+      {
+        "comment_id": "…",
+        "cat_id": "…",
+        "comment": "So cute!",
+        "comment_at": "2024-05-03T10:00:00Z",
+        "user": { "...GuestUser..." },
+        "is_owner": true
+      }
+    ],
+    "next_page": 2
+  }
+  ```
+- **Failure**:
+  - `400` missing/invalid `cat_id`, page, or limit
+  - `401` invalid session token (when provided)
+  - `404` cat not found
+  - `500` read errors
+
+#### `POST /cats/comments/delete`
+
+Delete the caller's own comment.
+
+- **Body fields**:
+  - `session_token` (required)
+  - `comment_id` (required UUID v4)
+- **Success** `200 OK`: `{ "success": true, "error": "", "status": "deleted" }`
+- **Failure**:
+  - `401` missing/invalid session token
+  - `400` missing/invalid `comment_id`
+  - `403` attempting to delete another user's comment
+  - `404` comment not found
+  - `500` delete errors
 
 ### Collection Endpoints
 
